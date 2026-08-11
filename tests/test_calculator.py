@@ -1,5 +1,6 @@
 # -*- coding: utf-8 -*-
 
+import math
 import unittest
 from src.core.calculator import RTCalculator
 
@@ -829,6 +830,97 @@ class TestRTCalculatorEdgeCases(unittest.TestCase):
         if hasattr(self.calc, 'calculate_dwsi_exposures'):
             with self.subTest("check exposures for dwdi elliptic"):
                 pass
+
+    # --- Panel-coverage based exposures (ISO 17636-2 Annex A) ---------------
+
+    def test_panel_exposures_panoramic(self):
+        r = self.calc.calculate_panel_exposures(114.3, 8.56, "swsi", "class_b", 200.0, std_figure="fig5")
+        self.assertEqual(r["n_panel"], 1)
+        self.assertEqual(r["limiting_factor"], "panoramic")
+
+    def test_panel_exposures_dwdi_fixed(self):
+        r = self.calc.calculate_panel_exposures(60.0, 4.0, "dwdi_elliptic", "class_b", 200.0)
+        self.assertEqual(r["n_panel"], 2)
+        r = self.calc.calculate_panel_exposures(60.0, 4.0, "dwdi_super", "class_b", 200.0)
+        self.assertEqual(r["n_panel"], 3)
+
+    def test_panel_exposures_sanity(self):
+        r = self.calc.calculate_panel_exposures(114.3, 8.56, "dwsi", "class_b", 200.0)
+        self.assertGreaterEqual(r["n_panel"], 3)
+        self.assertGreater(r["theta_dt_deg"], 0.0)
+        self.assertGreater(r["theta_panel_deg"], 0.0)
+        self.assertIn(r["limiting_factor"], ("thickness", "panel"))
+        self.assertGreater(r["arc_mm"], 0.0)
+        self.assertGreater(r["sdd"], 0.0)
+
+    def test_panel_exposures_wider_panel_reduces_n(self):
+        n_small = self.calc.calculate_panel_exposures(114.3, 8.56, "dwsi", "class_b", 100.0)["n_panel"]
+        n_large = self.calc.calculate_panel_exposures(114.3, 8.56, "dwsi", "class_b", 400.0)["n_panel"]
+        self.assertLessEqual(n_large, n_small)
+
+    def test_panel_exposures_overlap_increases_n(self):
+        n_none = self.calc.calculate_panel_exposures(114.3, 8.56, "dwsi", "class_b", 200.0, overlap_percent=0.0)["n_panel"]
+        n_20 = self.calc.calculate_panel_exposures(114.3, 8.56, "dwsi", "class_b", 200.0, overlap_percent=20.0)["n_panel"]
+        self.assertGreaterEqual(n_20, n_none)
+
+    def test_panel_exposures_class_b_stricter(self):
+        n_a = self.calc.calculate_panel_exposures(114.3, 8.56, "dwsi", "class_a", 200.0)["n_panel"]
+        n_b = self.calc.calculate_panel_exposures(114.3, 8.56, "dwsi", "class_b", 200.0)["n_panel"]
+        self.assertGreaterEqual(n_b, n_a)
+
+    def test_panel_exposures_swsi_source_outside(self):
+        r = self.calc.calculate_panel_exposures(114.3, 8.56, "swsi", "class_b", 200.0, std_figure="fig7")
+        self.assertGreaterEqual(r["n_panel"], 1)
+        self.assertIn(r["limiting_factor"], ("thickness", "panel"))
+
+    def test_panel_exposures_height_check(self):
+        r = self.calc.calculate_panel_exposures(114.3, 8.56, "dwsi", "class_b", 200.0, panel_height=50.0, cap=3.0)
+        self.assertIn("panel_height_ok", r)
+        self.assertIsInstance(r["panel_height_ok"], bool)
+        self.assertGreater(r["wae_width_mm"], 0.0)
+
+    def test_panel_exposures_default_overlap(self):
+        # overlap_percent=None/blank defaults handled at UI; here ensure default 10 used
+        r1 = self.calc.calculate_panel_exposures(114.3, 8.56, "dwsi", "class_b", 200.0)
+        r2 = self.calc.calculate_panel_exposures(114.3, 8.56, "dwsi", "class_b", 200.0, overlap_percent=10.0)
+        self.assertEqual(r1["n_panel"], r2["n_panel"])
+
+    def test_panel_exposures_wide_swsi_few_exposures(self):
+        # Large panel + thick pipe + SWSI should converge to a modest N (>= 1)
+        r = self.calc.calculate_panel_exposures(273.1, 12.7, "swsi", "class_a", 400.0,
+                                                sfd=900.0, bgap=10.0)
+        self.assertGreaterEqual(r["n_panel"], 1)
+        self.assertLessEqual(r["iterations"], 6)
+
+    def test_evaluate_exposure_comparison(self):
+        c = self.calc.evaluate_exposure_comparison(4, 5, 5)
+        self.assertEqual(c["n_required"], 5)
+        self.assertTrue(c["is_sufficient"])
+        c = self.calc.evaluate_exposure_comparison(4, 5, 3)
+        self.assertEqual(c["n_required"], 5)
+        self.assertFalse(c["is_sufficient"])
+        c = self.calc.evaluate_exposure_comparison(6, 4, 6)
+        self.assertEqual(c["n_required"], 6)
+        self.assertTrue(c["is_sufficient"])
+
+    def test_thickness_half_angle_class_b(self):
+        # Class B: k_tol = 1.10 -> max half-angle near 24.6 deg when the source is far
+        re = 100.0
+        t = 10.0
+        theta = self.calc._thickness_half_angle(re, t, 500.0, 1.10)
+        self.assertGreater(theta, 0.3)
+        self.assertLess(theta, math.pi / 2.0)
+        path = self.calc._penetrated_path_length(theta, re, re - t, 500.0)
+        self.assertAlmostEqual(path / t, 1.10, places=3)
+
+    def test_panel_half_angle_monotonic(self):
+        # Larger panel -> larger half angle
+        re = 100.0
+        f = 500.0
+        sdd = 550.0
+        a1 = self.calc._panel_half_angle(re, f, sdd, 50.0)
+        a2 = self.calc._panel_half_angle(re, f, sdd, 150.0)
+        self.assertGreaterEqual(a2, a1)
 
 if __name__ == "__main__":
     unittest.main()

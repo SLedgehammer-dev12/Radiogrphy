@@ -57,6 +57,8 @@ class ProcedureComplianceChecker:
                 "srb_fail": "SRb ÇÖZÜNÜRLÜĞÜ YETERSİZ! Uygulanan: {} µm > Maksimum Limit: {} µm.",
                 "overlap_pass": "Film Bindirme Uygun: {:.1f} mm >= Asgari 10.0 mm.",
                 "overlap_fail": "FİLM BİNDİRME MESAFESİ YETERSİZ! Uygulanan: {:.1f} mm < Asgari: 10.0 mm.",
+                "exp_pass": "Poz Sayısı Uygun: Uygulanan {applied} >= Gerekli {required} (Grafik/Standart: {graph}, Panel: {panel}).",
+                "exp_fail": "POZ SAYISI UYGUN DEĞİL! Uygulanan: {applied} < Gerekli: {required} (Grafik/Standart: {graph}, Panel: {panel}).",
             },
             "en": {
                 "voltage_pass": "Tube Voltage Compliant: {:.1f} kV <= Max {:.1f} kV limit.",
@@ -94,6 +96,8 @@ class ProcedureComplianceChecker:
                 "srb_fail": "SRb RESOLUTION INSUFFICIENT! Applied: {} µm > Max Limit: {} µm.",
                 "overlap_pass": "Film Overlap Compliant: {:.1f} mm >= Min 10.0 mm.",
                 "overlap_fail": "FILM OVERLAP INSUFFICIENT! Applied: {:.1f} mm < Min: 10.0 mm.",
+                "exp_pass": "Exposure Count Compliant: Applied {applied} >= Required {required} (Graph/Standard: {graph}, Panel: {panel}).",
+                "exp_fail": "EXPOSURE COUNT NON-COMPLIANT! Applied: {applied} < Required: {required} (Graph/Standard: {graph}, Panel: {panel}).",
             }
         }
 
@@ -309,6 +313,26 @@ class ProcedureComplianceChecker:
             # Generate a warning (time is not critical for compliance in standard directly but good checkpoint)
             # We don't mark is_compliant as False because time deviation is warning-only
             checks.append({"name": "time", "status": True, "details": l_msgs["time_diff"].format(calc_min, calc_sec, app_min, app_sec, diff*100)})
+
+        # 12. Exposure Count Check (Digital only — panel coverage vs standard/graph)
+        if tech == "digital":
+            req_exposures = calculated.get("required_exposures")
+            if req_exposures is not None:
+                n_graph = calculated.get("exposures_graph", 0) or 0
+                n_panel = calculated.get("exposures_panel", 0) or 0
+                n_applied = applied.get("applied_exposures", 0) or 0
+                n_req = max(int(req_exposures), int(n_graph), int(n_panel))
+                if n_applied >= n_req:
+                    checks.append({
+                        "name": "exposures", "status": True,
+                        "details": l_msgs["exp_pass"].format(applied=n_applied, required=n_req, graph=n_graph, panel=n_panel)
+                    })
+                else:
+                    is_compliant = False
+                    checks.append({
+                        "name": "exposures", "status": False,
+                        "details": l_msgs["exp_fail"].format(applied=n_applied, required=n_req, graph=n_graph, panel=n_panel)
+                    })
 
         return {
             "is_compliant": is_compliant,

@@ -1,5 +1,17 @@
 # Changelog
 
+## [1.3.3] - 2026-08-11
+
+### Added
+- Flat-panel DDA coverage-based minimum exposure count per ISO 17636-2:2022 (Clauses 7.6/7.8)
+- New panel inputs (digital only): active width/height, digital image overlap %, applied exposures
+- Panel vs standard/graph vs applied exposure comparison in outputs and procedure compliance check
+- PDF report rows for panel/applied/check exposure values
+
+### Infrastructure
+- Fully automated GitHub release pipeline: on push to `main`, a version bump in `src/core/version.py` triggers Windows .exe + macOS .dmg + Android APK build and GitHub Release creation
+- Version is now read from `src/core/version.py` in the macOS bundle plist
+
 ## [1.3.2] - 2026-06-19
 
 ### Changed

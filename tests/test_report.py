@@ -193,6 +193,39 @@ class TestPDFReportGenerator(unittest.TestCase):
             header = f.read(5)
         self.assertEqual(header, b"%PDF-", "File does not start with PDF header")
 
+    def test_generate_report_with_panel_exposures(self):
+        filepath = os.path.join(self.tmpdir, "test_panel_exposures.pdf")
+        outputs = self._make_outputs(
+            exposures=6,
+            exposures_panel=9,
+            exposures_applied=8,
+            exposures_check=False,
+        )
+        result = self.gen.generate_report(
+            filepath, self._make_inputs(), outputs,
+            [], None, False, None, self.lang
+        )
+        self.assertTrue(result)
+
+    def test_generate_report_panel_exposures_analog_na(self):
+        filepath = os.path.join(self.tmpdir, "test_panel_exposures_analog.pdf")
+        inputs = self._make_inputs(
+            tech="analog",
+            tech_text="Analog Film (ISO 17636-1)",
+        )
+        outputs = self._make_outputs(
+            u_max=None,
+            duplex_iqi="N/A (Analog Film)",
+            exposures_panel=None,
+            exposures_applied=None,
+            exposures_check=None,
+        )
+        result = self.gen.generate_report(
+            filepath, inputs, outputs,
+            [], None, False, None, self.lang
+        )
+        self.assertTrue(result)
+
     def tearDown(self):
         import shutil
         shutil.rmtree(self.tmpdir, ignore_errors=True)

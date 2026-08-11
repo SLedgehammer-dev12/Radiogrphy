@@ -9,7 +9,7 @@ from PyQt6.QtWidgets import (QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QGr
                              QMessageBox, QFormLayout, QTabWidget, QDialog, QProgressDialog,
                              QMenuBar, QSplitter)
 from PyQt6.QtCore import Qt, QThread, QTimer, QSettings, pyqtSignal
-from PyQt6.QtGui import QFont, QPalette, QColor, QDoubleValidator, QAction
+from PyQt6.QtGui import QFont, QPalette, QColor, QDoubleValidator, QIntValidator, QAction
 
 from src.core.translation import Translation
 from src.core.calculator import RTCalculator
@@ -140,6 +140,10 @@ class MainWindow(QMainWindow,
             "txt_output": "5.0",
             "txt_app_activity": "40.0",
             "txt_base_e": "3.0",
+            "txt_panel_width": "200.0",
+            "txt_panel_height": "200.0",
+            "txt_panel_overlap": "",
+            "txt_app_exposures": "6",
         }
         for le_name, default_val in line_edits.items():
             w = getattr(self, le_name, None)
@@ -202,6 +206,8 @@ class MainWindow(QMainWindow,
         line_edits = [
             "txt_custom_od", "txt_custom_t", "txt_cap", "txt_d",
             "txt_app_sfd", "txt_output", "txt_app_activity", "txt_base_e",
+            "txt_panel_width", "txt_panel_height", "txt_panel_overlap",
+            "txt_app_exposures",
         ]
         for le_name in line_edits:
             val = s.value(f"form/{le_name}")
@@ -433,6 +439,35 @@ class MainWindow(QMainWindow,
         self.txt_app_quality.textChanged.connect(self.update_calculations)
         grp_exposure_layout.addRow(self.lbl_app_quality, self.txt_app_quality)
 
+        # Panel Active Width (digital only)
+        self.lbl_panel_width = QLabel(self.trans.get("panel_width"))
+        self.txt_panel_width = QLineEdit("200.0")
+        self.txt_panel_width.setValidator(QDoubleValidator(10.0, 2000.0, 1))
+        self.txt_panel_width.textChanged.connect(self.update_calculations)
+        grp_exposure_layout.addRow(self.lbl_panel_width, self.txt_panel_width)
+
+        # Panel Active Height (digital only)
+        self.lbl_panel_height = QLabel(self.trans.get("panel_height"))
+        self.txt_panel_height = QLineEdit("200.0")
+        self.txt_panel_height.setValidator(QDoubleValidator(10.0, 2000.0, 1))
+        self.txt_panel_height.textChanged.connect(self.update_calculations)
+        grp_exposure_layout.addRow(self.lbl_panel_height, self.txt_panel_height)
+
+        # Digital Image Overlap % (digital only, blank -> 10% fallback)
+        self.lbl_panel_overlap = QLabel(self.trans.get("panel_overlap"))
+        self.txt_panel_overlap = QLineEdit("")
+        self.txt_panel_overlap.setValidator(QDoubleValidator(0.0, 50.0, 1))
+        self.txt_panel_overlap.setPlaceholderText("10.0")
+        self.txt_panel_overlap.textChanged.connect(self.update_calculations)
+        grp_exposure_layout.addRow(self.lbl_panel_overlap, self.txt_panel_overlap)
+
+        # Applied Exposures (digital only)
+        self.lbl_app_exposures = QLabel(self.trans.get("applied_exposures"))
+        self.txt_app_exposures = QLineEdit("6")
+        self.txt_app_exposures.setValidator(QIntValidator(1, 100))
+        self.txt_app_exposures.textChanged.connect(self.update_calculations)
+        grp_exposure_layout.addRow(self.lbl_app_exposures, self.txt_app_exposures)
+
         # Applied Overlap Length for analog
         # (note: this is a duplicate concept from txt_app_overlap above — kept for clarity)
 
@@ -462,7 +497,8 @@ class MainWindow(QMainWindow,
         self.info_buttons = {}
         out_fields = [
             "w_nom", "w_eff", "u_max", "f_min", "sfd_min",
-            "ug", "req_exposures", "single_wire_iqi", "duplex_iqi",
+            "ug", "req_exposures", "exposures_panel", "exposures_applied", "exposures_check",
+            "single_wire_iqi", "duplex_iqi",
             "quality_target", "calc_time", "detector_quality",
             "filter_recommendation"
         ]
@@ -627,6 +663,16 @@ class MainWindow(QMainWindow,
         self.cmb_app_duplex.setVisible(is_digital)
         self.lbl_snr_location.setVisible(is_digital)
         self.cmb_snr_location.setVisible(is_digital)
+
+        # Panel coverage inputs visibility (digital only)
+        self.lbl_panel_width.setVisible(is_digital)
+        self.txt_panel_width.setVisible(is_digital)
+        self.lbl_panel_height.setVisible(is_digital)
+        self.txt_panel_height.setVisible(is_digital)
+        self.lbl_panel_overlap.setVisible(is_digital)
+        self.txt_panel_overlap.setVisible(is_digital)
+        self.lbl_app_exposures.setVisible(is_digital)
+        self.txt_app_exposures.setVisible(is_digital)
         
         # update target label name
         target_name = "target_snr" if is_digital else "optical_density"
@@ -932,6 +978,12 @@ class MainWindow(QMainWindow,
         self.lbl_app_srb.setText(self.trans.get("applied_srb"))
         self.lbl_app_overlap.setText(self.trans.get("applied_overlap"))
 
+        # Panel coverage inputs (digital only)
+        self.lbl_panel_width.setText(self.trans.get("panel_width"))
+        self.lbl_panel_height.setText(self.trans.get("panel_height"))
+        self.lbl_panel_overlap.setText(self.trans.get("panel_overlap"))
+        self.lbl_app_exposures.setText(self.trans.get("applied_exposures"))
+
         is_digital = self.rad_digital.isChecked()
         if is_digital:
             self.lbl_app_quality.setText(self.trans.get("applied_quality") + " (SNR_N):")
@@ -996,6 +1048,10 @@ class MainWindow(QMainWindow,
             (self.txt_app_overlap, 0.0, 500.0),
             (self.txt_app_srb, 1.0, 1000.0),
             (self.txt_app_quality, 0.01, 10000.0),
+            (self.txt_panel_width, 10.0, 2000.0),
+            (self.txt_panel_height, 10.0, 2000.0),
+            (self.txt_panel_overlap, 0.0, 50.0),
+            (self.txt_app_exposures, 1.0, 100.0),
             (self.txt_dd, 1.0, 1000.0),
             (self.txt_bed, 0.0, 500.0),
             (self.txt_bgap, 0.0, 100.0),
@@ -1082,6 +1138,28 @@ class MainWindow(QMainWindow,
 
         return od, t, cap, d, sfd, output_val, base_e, detector_type, film_class_used, chart_source
 
+    def get_panel_inputs(self):
+        """
+        Parses the flat-panel DDA inputs. Blank overlap falls back to 10%.
+        Returns (panel_width, panel_height, overlap_percent, applied_exposures).
+        """
+        def _float(widget, default):
+            try:
+                return float(widget.text().strip().replace(",", "."))
+            except ValueError:
+                return default
+
+        panel_width = max(10.0, _float(self.txt_panel_width, 200.0))
+        panel_height = max(10.0, _float(self.txt_panel_height, 200.0))
+        overlap = _float(self.txt_panel_overlap, 10.0)
+        overlap = max(0.0, min(overlap, 50.0))
+        try:
+            app_exposures = int(_float(self.txt_app_exposures, 6))
+        except (ValueError, TypeError):
+            app_exposures = 6
+        app_exposures = max(1, app_exposures)
+        return panel_width, panel_height, overlap, app_exposures
+
     def update_calculations(self):
         # 1. Fetch values
         od, t, cap, d, sfd, output_val, base_e, detector_type, film_class_used, chart_source = self.get_form_values()
@@ -1109,6 +1187,7 @@ class MainWindow(QMainWindow,
                 geometry = "dwsi"
         
         # 3. Dynamic calculations
+        warnings = []
         w_nom, w_eff = self.calc.calculate_thicknesses(t, cap, geometry)
         
         # Tube Voltage kV
@@ -1168,6 +1247,38 @@ class MainWindow(QMainWindow,
         else: # DWSI
             exposures = self.calc.calculate_dwsi_exposures(od, t, sfd, testing_class)
 
+        # Panel-coverage minimum exposures (ISO 17636-2:2022 Clauses 7.6/7.8, digital only)
+        n_panel = None
+        n_applied = None
+        n_required = exposures
+        exposures_ok = None
+        if tech == "digital":
+            panel_width, panel_height, overlap_pct, n_applied = self.get_panel_inputs()
+            panel_res = self.calc.calculate_panel_exposures(
+                od, t, geometry, testing_class, panel_width,
+                panel_height=panel_height, cap=cap, sfd=sfd, bgap=bgap,
+                overlap_percent=overlap_pct, focal_size=d, std_figure=std_figure,
+            )
+            n_panel = panel_res["n_panel"]
+            cmp_res = self.calc.evaluate_exposure_comparison(exposures, n_panel, n_applied)
+            n_required = cmp_res["n_required"]
+            exposures_ok = cmp_res["is_sufficient"]
+            if panel_res["limiting_factor"] == "panel":
+                if self.trans.language == "tr":
+                    warnings.append(f"BİLGİ: Panel aktif genişliği ({panel_width:.0f} mm) poz sayısını sınırlıyor (θ={panel_res['theta_panel_deg']:.1f}°).")
+                else:
+                    warnings.append(f"NOTE: Panel active width ({panel_width:.0f} mm) limits exposure count (θ={panel_res['theta_panel_deg']:.1f}°).")
+            if not panel_res["panel_height_ok"]:
+                if self.trans.language == "tr":
+                    warnings.append(f"UYARI: Panel aktif yüksekliği ({panel_height:.0f} mm) WAE genişliğini ({panel_res['wae_width_mm']:.1f} mm) karşılamıyor.")
+                else:
+                    warnings.append(f"WARNING: Panel active height ({panel_height:.0f} mm) is smaller than WAE width ({panel_res['wae_width_mm']:.1f} mm).")
+            if not cmp_res["is_sufficient"]:
+                if self.trans.language == "tr":
+                    warnings.append(f"UYARI: Uygulanan poz sayısı ({n_applied}) gerekli minimumu ({n_required}) karşılamıyor.")
+                else:
+                    warnings.append(f"WARNING: Applied exposures ({n_applied}) do not meet the required minimum ({n_required}).")
+
         # Parse kV input for X-ray early
         if source == "x_ray":
             try:
@@ -1201,7 +1312,6 @@ class MainWindow(QMainWindow,
             detector_quality_str = f"Max {max_srb_req} µm"
 
         # Quality Targets & Level 3 Compensation
-        warnings = []
         target_quality = ""
         sfd_comp_target = None
         
@@ -1472,6 +1582,24 @@ class MainWindow(QMainWindow,
         self.out_labels["sfd_min"][1].setText(f"{sfd_min:.1f} mm")
         self.out_labels["ug"][1].setText(f"{ug:.3f} mm")
         self.out_labels["req_exposures"][1].setText(f"{exposures}")
+        if n_panel is None:
+            self.out_labels["exposures_panel"][1].setText("N/A")
+            self.out_labels["exposures_applied"][1].setText("N/A")
+            self.out_labels["exposures_check"][1].setText("N/A")
+        else:
+            self.out_labels["exposures_panel"][1].setText(f"{n_panel}")
+            self.out_labels["exposures_applied"][1].setText(f"{n_applied}")
+            if exposures_ok:
+                if self.trans.language == "tr":
+                    check_str = f"UYGUN (≥ {n_required})"
+                else:
+                    check_str = f"OK (≥ {n_required})"
+            else:
+                if self.trans.language == "tr":
+                    check_str = f"UYGUN DEĞİL (< {n_required})"
+                else:
+                    check_str = f"NOT OK (< {n_required})"
+            self.out_labels["exposures_check"][1].setText(check_str)
         self.out_labels["single_wire_iqi"][1].setText(wire_str)
         
         if tech == "digital":
@@ -1521,6 +1649,11 @@ class MainWindow(QMainWindow,
             "max_srb": max_srb_req,
             "filter_recommendation": filter_str
         }
+        self.last_calculated["exposures_graph"] = exposures
+        self.last_calculated["exposures_panel"] = n_panel
+        self.last_calculated["exposures_applied"] = n_applied
+        self.last_calculated["required_exposures"] = n_required
+        self.last_calculated["exposures_ok"] = exposures_ok
         if tech == "digital":
             self.last_calculated["required_snr"] = target_snr_val
         else:
@@ -1657,7 +1790,8 @@ class MainWindow(QMainWindow,
             "applied_quality": applied_quality,
             "applied_srb": applied_srb,
             "applied_film_class": applied_film_class,
-            "applied_overlap": applied_overlap
+            "applied_overlap": applied_overlap,
+            "applied_exposures": self.get_panel_inputs()[3] if tech == "digital" else None
         }
 
         # Call procedure checker
@@ -1806,6 +1940,9 @@ class MainWindow(QMainWindow,
             "f_min": f_min,
             "sfd_min": sfd_min,
             "exposures": exposures,
+            "exposures_panel": self.last_calculated.get("exposures_panel"),
+            "exposures_applied": self.last_calculated.get("exposures_applied"),
+            "exposures_check": self.last_calculated.get("exposures_ok"),
             "single_wire_iqi": wire_str,
             "duplex_iqi": duplex_str if tech == "digital" else "N/A",
             "quality_target": target_quality,

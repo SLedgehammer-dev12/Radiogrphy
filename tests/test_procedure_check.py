@@ -298,5 +298,87 @@ class TestProcedureComplianceChecker(unittest.TestCase):
         res = self.checker.check_compliance(inputs, calculated, applied, {}, "en")
         self.assertFalse(res["is_compliant"])
 
+    def test_exposure_count_compliance(self):
+        inputs = {
+            "tech": "digital",
+            "source": "x_ray",
+            "class": "class_b",
+            "geometry": "dwsi",
+            "film_side": True,
+            "iqi_type": "wire"
+        }
+        calculated = {
+            "u_max": 150.0,
+            "sfd_min": 500.0,
+            "required_wire_no": 12,
+            "required_duplex_no": 10,
+            "required_snr": 130.0,
+            "exposures_graph": 6,
+            "exposures_panel": 9,
+            "exposures_applied": 8,
+            "required_exposures": 9,
+            "exposures_ok": False
+        }
+        base_applied = {
+            "applied_kv": 140.0,
+            "applied_sfd": 550.0,
+            "applied_wire": 13,
+            "applied_duplex": 11,
+            "applied_quality": 150.0,
+            "applied_time": 60.0,
+            "applied_srb": 80.0,
+            "applied_exposures": 8
+        }
+
+        # Case 1: applied (8) < required (9) -> non-compliant, check present
+        res = self.checker.check_compliance(inputs, calculated, base_applied, {}, "en")
+        self.assertFalse(res["is_compliant"])
+        exp_checks = [c for c in res["checks"] if c["name"] == "exposures"]
+        self.assertEqual(len(exp_checks), 1)
+        self.assertFalse(exp_checks[0]["status"])
+
+        # Case 2: applied (10) >= required (9) -> compliant
+        base_applied["applied_exposures"] = 10
+        res = self.checker.check_compliance(inputs, calculated, base_applied, {}, "en")
+        self.assertTrue(res["is_compliant"])
+        exp_checks = [c for c in res["checks"] if c["name"] == "exposures"]
+        self.assertTrue(exp_checks[0]["status"])
+
+        # Case 3: required_exposures not present -> check skipped, no crash
+        del calculated["required_exposures"]
+        res = self.checker.check_compliance(inputs, calculated, base_applied, {}, "en")
+        exp_checks = [c for c in res["checks"] if c["name"] == "exposures"]
+        self.assertEqual(len(exp_checks), 0)
+
+    def test_exposure_count_skipped_for_analog(self):
+        inputs = {
+            "tech": "analog",
+            "source": "x_ray",
+            "class": "class_b",
+            "geometry": "dwsi",
+            "film_side": True,
+            "iqi_type": "wire"
+        }
+        calculated = {
+            "u_max": 150.0,
+            "sfd_min": 500.0,
+            "required_wire_no": 12,
+            "required_exposures": 9,
+            "required_density": 2.3
+        }
+        applied = {
+            "applied_kv": 140.0,
+            "applied_sfd": 550.0,
+            "applied_wire": 13,
+            "applied_quality": 2.5,
+            "applied_time": 60.0,
+            "applied_film_class": "C4",
+            "applied_overlap": 12.0,
+            "applied_exposures": 3
+        }
+        res = self.checker.check_compliance(inputs, calculated, applied, {}, "en")
+        exp_checks = [c for c in res["checks"] if c["name"] == "exposures"]
+        self.assertEqual(len(exp_checks), 0)
+
 if __name__ == "__main__":
     unittest.main()

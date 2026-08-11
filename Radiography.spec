@@ -107,8 +107,8 @@ if sys.platform == "darwin":
         info_plist={
             "NSHighResolutionCapable": True,
             "NSSupportsAutomaticGraphicsSwitching": True,
-            "CFBundleShortVersionString": "1.2.0",
-            "CFBundleVersion": "1.2.0",
+            "CFBundleShortVersionString": APP_VERSION,
+            "CFBundleVersion": APP_VERSION,
             "NSHumanReadableCopyright": "2026 Radiography",
         },
     )

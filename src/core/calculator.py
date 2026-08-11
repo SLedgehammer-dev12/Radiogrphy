@@ -1029,6 +1029,243 @@ class RTCalculator:
         # Return the stricter of geometric calculation vs ISO table
         return max(geo_n, iso_min)
 
+    # -----------------------------------------------------------------------
+    # Flat-panel (DDA) coverage-based minimum exposures (ISO 17636-2 Annex A)
+    # -----------------------------------------------------------------------
+    THICKNESS_TOLERANCE = {
+        "class_a": 0.20,
+        "class_b": 0.10,
+    }
+
+    def _penetrated_path_length(self, theta, re, ri, f):
+        """
+        Returns the penetrated path length (mm) through the far wall for a ray
+        from source S(0, -(re+f)) to point P on the far outer wall at half-angle
+        theta. Used for the Δt/t thickness-variation limit (Clause 7.8 / Annex A).
+        At theta = 0 the path length equals the wall thickness t = re - ri.
+        Returns None if the ray misses the inner wall.
+        """
+        a = re * math.sin(theta)
+        c = re * (1.0 + math.cos(theta)) + f
+        A = a * a + c * c
+        if A <= 0:
+            return None
+        B = -2.0 * c * (re + f)
+        C = (re + f) ** 2 - ri * ri
+        disc = B * B - 4.0 * A * C
+        if disc < 0:
+            return None
+        u_far = (-B + math.sqrt(disc)) / (2.0 * A)
+        return (1.0 - u_far) * math.sqrt(A)
+
+    def _ray_panel_offset(self, theta, re, f, sdd):
+        """
+        Lateral offset (mm) of the ray to the far-wall point P(theta) measured at
+        the detector plane located at distance SDD from the source.
+        """
+        denom = re * (1.0 + math.cos(theta)) + f
+        if denom <= 0:
+            return float("inf")
+        tan_delta = re * math.sin(theta) / denom
+        return sdd * tan_delta
+
+    def _thickness_half_angle(self, re, t, f, k_tol, max_iter=50):
+        """
+        Binary search for the maximum half-angle (rad) at which the penetrated
+        far-wall path length equals k_tol * t (the Δt/t limit). If even the
+        tangent ray does not reach the limit, returns pi/2 (not thickness limited).
+        """
+        if re <= 0 or t <= 0 or f <= 0 or k_tol <= 1.0:
+            return 0.0
+        ri = re - t
+        if ri <= 0:
+            return 0.0
+        target = k_tol * t
+        path_hi = self._penetrated_path_length(math.pi / 2.0, re, ri, f)
+        if path_hi is not None and path_hi < target:
+            return math.pi / 2.0
+        low, high = 0.0, math.pi / 2.0
+        best = 0.0
+        for _ in range(max_iter):
+            mid = (low + high) / 2.0
+            path = self._penetrated_path_length(mid, re, ri, f)
+            if path is None:
+                high = mid
+                continue
+            if path <= target:
+                best = mid
+                low = mid
+            else:
+                high = mid
+        return best
+
+    def _panel_half_angle(self, re, f, sdd, panel_half_width, max_iter=50):
+        """
+        Binary search for the maximum half-angle (rad) at which the ray to the
+        far-wall point P(theta) hits the detector plane within panel_half_width
+        of the central ray.
+        """
+        if re <= 0 or sdd <= 0 or panel_half_width <= 0:
+            return 0.0
+        low, high = 0.0, math.pi / 2.0
+        best = 0.0
+        for _ in range(max_iter):
+            mid = (low + high) / 2.0
+            offset = self._ray_panel_offset(mid, re, f, sdd)
+            if offset <= panel_half_width:
+                best = mid
+                low = mid
+            else:
+                high = mid
+        return best
+
+    def estimate_wae_width(self, cap, t):
+        """
+        Heuristic estimate of the weld area to evaluate (WAE) width along the pipe
+        axis: weld bead plus heat-affected zones on both sides.
+        weld_width ~ max(t, 2*cap); HAZ ~ 10 mm each side.
+        Used only for the informational panel-height check.
+        """
+        weld_width = max(float(t), 2.0 * float(cap))
+        return weld_width + 2.0 * 10.0
+
+    def _panel_result_fixed(self, n, od, t, cap, reason, panel_height=None):
+        wae_width = self.estimate_wae_width(cap, t)
+        panel_height_ok = True if panel_height is None else (panel_height >= wae_width - 1e-9)
+        return {
+            "n_panel": int(n),
+            "theta_deg": 0.0,
+            "theta_dt_deg": 0.0,
+            "theta_panel_deg": 0.0,
+            "bed": 0.0,
+            "b": 0.0,
+            "f": 0.0,
+            "sdd": 0.0,
+            "arc_mm": 0.0,
+            "limiting_factor": reason,
+            "iterations": 0,
+            "panel_height_ok": panel_height_ok,
+            "wae_width_mm": wae_width,
+        }
+
+    def calculate_panel_exposures(self, od, t, geometry, testing_class, panel_width,
+                                  panel_height=None, cap=0.0, sfd=600.0, bgap=5.0,
+                                  overlap_percent=10.0, focal_size=2.0,
+                                  std_figure=None, max_iterations=6):
+        """
+        Calculates the minimum number of exposures required so that a flat-panel
+        DDA covers the whole circumference within the evaluable area limits
+        (ISO 17636-2:2022 Clauses 7.6, 7.8 and Annex A).
+
+        Fixed-geometry cases:
+          - Panoramic central projection (Fig 5): N = 1
+          - DWDI elliptic: N = 2, DWDI superimposed: N = 3
+
+        For SWSI (source outside) and DWSI the geometric coverage model applies:
+          - θ = min(θ_Δt, θ_panel) is the maximum half-angle per exposure
+            (θ_Δt  -> penetrated thickness increase limited to Δt/t;
+             θ_panel -> flat-panel active width coverage at the detector plane)
+          - N = ceil(π / (θ · (1 - overlap_percent/100))), min N = 3 for DWSI
+          - b = bed + bgap + k·t with bed = (1 - cos α)·re, α = π/N (iterated
+            until N converges, max max_iterations passes)
+
+        Returns a dict with n_panel and the intermediate geometry values.
+        """
+        # Fixed-geometry cases
+        if self.is_central_projection(geometry, std_figure):
+            return self._panel_result_fixed(1, od, t, cap, "panoramic", panel_height)
+        if geometry == "dwdi_elliptic":
+            return self._panel_result_fixed(2, od, t, cap, "dwdi_elliptic", panel_height)
+        if geometry == "dwdi_super":
+            return self._panel_result_fixed(3, od, t, cap, "dwdi_super", panel_height)
+
+        re = od / 2.0
+        t_wall = max(float(t), 0.1)
+        ri = re - t_wall
+        if re <= 0 or ri <= 0:
+            return self._panel_result_fixed(3, od, t, cap, "invalid_geometry", panel_height)
+
+        dt_t = self.THICKNESS_TOLERANCE.get(testing_class, 0.10)
+        k_tol = 1.0 + dt_t
+        k = 1.2 if testing_class == "class_a" else 1.1
+        overlap = max(0.0, min(float(overlap_percent), 90.0)) / 100.0
+        min_n = 3 if geometry == "dwsi" else 1
+
+        # Initial guess from the standard/graph minimum
+        try:
+            n_init = max(min_n, self.calculate_dwsi_exposures(od, t_wall, sfd, testing_class))
+        except Exception:
+            n_init = max(min_n, 3)
+        n_prev = n_init
+        theta_guess = math.pi / float(max(1, n_prev))
+
+        iterations = 0
+        for iterations in range(1, max_iterations + 1):
+            alpha = theta_guess
+            bed = (1.0 - math.cos(alpha)) * re
+            b_dist = bed + bgap + k * t_wall
+            f_dist = max(sfd - b_dist, 1.0)
+            sdd = f_dist + b_dist
+            theta_dt = self._thickness_half_angle(re, t_wall, f_dist, k_tol)
+            theta_panel = self._panel_half_angle(re, f_dist, sdd, panel_width / 2.0)
+            theta = max(min(theta_dt, theta_panel), 1e-6)
+            n_new = max(min_n, int(math.ceil(math.pi / (theta * (1.0 - overlap)))))
+            if n_new == n_prev:
+                break
+            n_prev = n_new
+            theta_guess = math.pi / float(n_new)
+
+        # Final pass with the converged angle
+        alpha = theta_guess
+        bed = (1.0 - math.cos(alpha)) * re
+        b_dist = bed + bgap + k * t_wall
+        f_dist = max(sfd - b_dist, 1.0)
+        sdd = f_dist + b_dist
+        theta_dt = self._thickness_half_angle(re, t_wall, f_dist, k_tol)
+        theta_panel = self._panel_half_angle(re, f_dist, sdd, panel_width / 2.0)
+        theta = max(min(theta_dt, theta_panel), 1e-6)
+        n_final = max(min_n, int(math.ceil(math.pi / (theta * (1.0 - overlap)))))
+
+        limiting = "thickness" if theta_dt <= theta_panel else "panel"
+
+        wae_width = self.estimate_wae_width(cap, t_wall)
+        panel_height_ok = True if panel_height is None else (panel_height >= wae_width - 1e-9)
+
+        return {
+            "n_panel": n_final,
+            "theta_deg": math.degrees(theta),
+            "theta_dt_deg": math.degrees(theta_dt),
+            "theta_panel_deg": math.degrees(theta_panel),
+            "bed": bed,
+            "b": b_dist,
+            "f": f_dist,
+            "sdd": sdd,
+            "arc_mm": od * theta,
+            "limiting_factor": limiting,
+            "iterations": iterations,
+            "panel_height_ok": panel_height_ok,
+            "wae_width_mm": wae_width,
+        }
+
+    def evaluate_exposure_comparison(self, n_graph, n_panel, n_applied):
+        """
+        Compares the standard/graph-based minimum exposures (n_graph), the
+        panel-coverage minimum exposures (n_panel) and the user's applied
+        exposures (n_applied). The governing required value is max(n_graph,
+        n_panel); the applied value is sufficient when it is >= that.
+        """
+        n_graph_i = max(1, int(n_graph))
+        n_panel_i = max(1, int(n_panel))
+        n_applied_i = max(0, int(n_applied))
+        n_required = max(n_graph_i, n_panel_i)
+        return {
+            "n_graph": n_graph_i,
+            "n_panel": n_panel_i,
+            "n_applied": n_applied_i,
+            "n_required": n_required,
+            "is_sufficient": n_applied_i >= n_required,
+        }
+
     def calculate_exposure_time(self, sfd, w_eff, source, output_val, base_factor,
                                  tech, testing_class="class_b",
                                  film_class="C5", detector_type="cr_standard",
