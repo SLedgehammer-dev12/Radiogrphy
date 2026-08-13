@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.3.5] - 2026-08-13
+
+### Fixed
+- Update check on Windows no longer fails with `SSL Certificate Verify Failed: missing authority key identifier`:
+  - The updater now uses an explicit CA bundle from `certifi` instead of relying on the default OpenSSL store, which PyInstaller-frozen builds cannot always resolve
+  - `certifi` added to `requirements.txt` and to the PyInstaller spec (`hiddenimports`) so the `cacert.pem` bundle is shipped inside the .exe/.dmg
+
 ## [1.3.4] - 2026-08-13
 
 ### Fixed

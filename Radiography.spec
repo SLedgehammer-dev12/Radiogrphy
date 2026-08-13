@@ -45,6 +45,8 @@ hiddenimports = [
     "importlib.metadata",
     "urllib",
     "urllib.request",
+    "ssl",
+    "certifi",
     "json",
     "threading",
 ]

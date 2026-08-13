@@ -1,6 +1,8 @@
 import json
 import os
 import platform
+import socket
+import ssl
 import sys
 import tempfile
 import threading
@@ -11,6 +13,23 @@ from src.core.version import __version__ as _version
 
 GITHUB_REPO = "SLedgehammer-dev12/Radiography"
 CURRENT_VERSION = _version
+
+
+def _ssl_context():
+    """
+    Builds an SSL context with an explicit CA bundle.
+
+    Packaged (PyInstaller) builds on Windows cannot always resolve the
+    default OpenSSL CA bundle, which surfaces as SSL chain verification
+    errors (e.g. "SSL Certificate Verify Failed: missing authority key
+    identifier"). certifi ships a self-contained cacert.pem bundle that
+    works in frozen executables.
+    """
+    try:
+        import certifi
+        return ssl.create_default_context(cafile=certifi.where())
+    except Exception:
+        return ssl.create_default_context()
 
 
 class UpdateChecker:
@@ -31,7 +50,7 @@ class UpdateChecker:
     def check(self):
         try:
             req = urllib.request.Request(self.api_url, headers={"Accept": "application/json", "User-Agent": "Radiography-Updater/1.0"})
-            with urllib.request.urlopen(req, timeout=10) as resp:
+            with urllib.request.urlopen(req, timeout=10, context=_ssl_context()) as resp:
                 data = json.loads(resp.read().decode("utf-8"))
         except Exception as e:
             return {"available": False, "error": str(e), "data": None}
@@ -64,7 +83,7 @@ class UpdateChecker:
         self._cancel = False
         try:
             req = urllib.request.Request(url, headers={"User-Agent": "Radiography-Updater/1.0"})
-            with urllib.request.urlopen(req, timeout=120) as resp:
+            with urllib.request.urlopen(req, timeout=120, context=_ssl_context()) as resp:
                 total = int(resp.headers.get("Content-Length", 0))
                 downloaded = 0
                 chunk_size = 8192
