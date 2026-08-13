@@ -892,6 +892,41 @@ class TestRTCalculatorEdgeCases(unittest.TestCase):
         self.assertGreaterEqual(r["n_panel"], 1)
         self.assertLessEqual(r["iterations"], 6)
 
+    def test_panel_exposures_b_object_overrides_b(self):
+        # User-provided material-to-detector distance fixes b (no bed iteration)
+        r = self.calc.calculate_panel_exposures(114.3, 8.56, "dwsi", "class_b", 200.0,
+                                                b_object=30.0)
+        self.assertEqual(r["b"], 30.0)
+        self.assertEqual(r["bed"], 0.0)
+
+    def test_panel_exposures_f_source_used(self):
+        r = self.calc.calculate_panel_exposures(114.3, 8.56, "dwsi", "class_b", 200.0,
+                                                f_source=700.0)
+        self.assertEqual(r["f"], 700.0)
+        self.assertEqual(r["sdd"], 700.0 + r["b"])
+
+    def test_panel_exposures_f_min_lower_bound(self):
+        # Very small user f is pushed up to the Clause 7.6 geometric limit
+        r = self.calc.calculate_panel_exposures(114.3, 8.56, "dwsi", "class_b", 200.0,
+                                                f_source=10.0, focal_size=4.0)
+        self.assertGreaterEqual(r["f"], r["f_min_applied"])
+        self.assertGreater(r["f"], 10.0)
+        self.assertEqual(r["f_min_applied"],
+                         self.calc.calculate_f_min(4.0, r["b"], "class_b", 8.56))
+
+    def test_panel_exposures_user_b_matches_manual_f_min(self):
+        # Consistency: with both f and b given, f_min still applied as a floor
+        r = self.calc.calculate_panel_exposures(114.3, 8.56, "dwsi", "class_b", 200.0,
+                                                b_object=20.0, f_source=50.0, focal_size=3.0)
+        self.assertEqual(r["b"], 20.0)
+        self.assertGreaterEqual(r["f"], r["f_min_applied"])
+
+    def test_f_min_increases_with_distance(self):
+        # b_eff larger -> f_min larger (Clause 7.6, C = 15 for class B)
+        f1 = self.calc.calculate_f_min(2.0, 20.0, "class_b", 10.0)
+        f2 = self.calc.calculate_f_min(2.0, 40.0, "class_b", 10.0)
+        self.assertGreater(f2, f1)
+
     def test_evaluate_exposure_comparison(self):
         c = self.calc.evaluate_exposure_comparison(4, 5, 5)
         self.assertEqual(c["n_required"], 5)

@@ -1,5 +1,19 @@
 # Changelog
 
+## [1.3.4] - 2026-08-13
+
+### Fixed
+- "Standart ISO Şekli" combo box no longer blank: the input-panel and standard-tab combos are now kept in sync (`_sync_std_figure_tab`)
+- Dynamic setup schematic now honours the selected theme: `draw_setup` was hard-coded to dark colours, so the light theme never applied
+- Fixed crash (`KeyError: f_min_applied`) on the panel coverage path when a fixed-geometry case returned early
+
+### Added
+- User-provided source-to-object distance (f) and object-to-detector distance (b) inputs (digital mode, blank = auto):
+  - `calculate_panel_exposures` accepts `f_source`/`b_object` overrides
+  - Measured geometry is checked against applied SFD, wall thickness and the Clause 7.6 `f_min = C·d·b^(2/3)` geometric limit
+- Base Exposure Multiplier input (default 1.0): scales the calculated exposure time and the compliance reference to compensate for field conditions (film batch, chemistry, detector ageing, material composition)
+- TR/EN translations and tooltips for the new fields; PDF report row for the base multiplier
+
 ## [1.3.3] - 2026-08-11
 
 ### Added

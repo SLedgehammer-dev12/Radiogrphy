@@ -1146,12 +1146,14 @@ class RTCalculator:
             "iterations": 0,
             "panel_height_ok": panel_height_ok,
             "wae_width_mm": wae_width,
+            "f_min_applied": 0.0,
         }
 
     def calculate_panel_exposures(self, od, t, geometry, testing_class, panel_width,
                                   panel_height=None, cap=0.0, sfd=600.0, bgap=5.0,
                                   overlap_percent=10.0, focal_size=2.0,
-                                  std_figure=None, max_iterations=6):
+                                  std_figure=None, max_iterations=6,
+                                  b_object=None, f_source=None):
         """
         Calculates the minimum number of exposures required so that a flat-panel
         DDA covers the whole circumference within the evaluable area limits
@@ -1168,6 +1170,14 @@ class RTCalculator:
           - N = ceil(π / (θ · (1 - overlap_percent/100))), min N = 3 for DWSI
           - b = bed + bgap + k·t with bed = (1 - cos α)·re, α = π/N (iterated
             until N converges, max max_iterations passes)
+
+        User-provided geometry overrides the derived values:
+          - b_object: measured material-to-detector distance (mm). When given,
+            b is fixed (no bed iteration).
+          - f_source: measured source-to-material distance (mm). When given,
+            it is used directly; otherwise f = max(sfd - b, 1.0).
+        The resulting source-to-object distance is never allowed to fall below
+        the ISO 17636-2 Clause 7.6 geometric limit f_min (focal-size based).
 
         Returns a dict with n_panel and the intermediate geometry values.
         """
@@ -1191,6 +1201,25 @@ class RTCalculator:
         overlap = max(0.0, min(float(overlap_percent), 90.0)) / 100.0
         min_n = 3 if geometry == "dwsi" else 1
 
+        # User-provided geometry overrides derived values when valid
+        b_user = b_object if (b_object is not None and b_object > 0.0) else None
+        f_user = f_source if (f_source is not None and f_source > 0.0) else None
+
+        def _geometry(alpha_guess):
+            """Returns (bed, b_dist, f_dist, sdd) for the current angular guess."""
+            if b_user is not None:
+                beds = 0.0
+                bd = b_user
+            else:
+                beds = (1.0 - math.cos(alpha_guess)) * re
+                bd = beds + bgap + k * t_wall
+            if f_user is not None:
+                fd = f_user
+            else:
+                fd = max(sfd - bd, 1.0)
+            fd = max(fd, self.calculate_f_min(focal_size, bd, testing_class, t_wall))
+            return beds, bd, fd, fd + bd
+
         # Initial guess from the standard/graph minimum
         try:
             n_init = max(min_n, self.calculate_dwsi_exposures(od, t_wall, sfd, testing_class))
@@ -1202,10 +1231,7 @@ class RTCalculator:
         iterations = 0
         for iterations in range(1, max_iterations + 1):
             alpha = theta_guess
-            bed = (1.0 - math.cos(alpha)) * re
-            b_dist = bed + bgap + k * t_wall
-            f_dist = max(sfd - b_dist, 1.0)
-            sdd = f_dist + b_dist
+            bed, b_dist, f_dist, sdd = _geometry(alpha)
             theta_dt = self._thickness_half_angle(re, t_wall, f_dist, k_tol)
             theta_panel = self._panel_half_angle(re, f_dist, sdd, panel_width / 2.0)
             theta = max(min(theta_dt, theta_panel), 1e-6)
@@ -1217,10 +1243,7 @@ class RTCalculator:
 
         # Final pass with the converged angle
         alpha = theta_guess
-        bed = (1.0 - math.cos(alpha)) * re
-        b_dist = bed + bgap + k * t_wall
-        f_dist = max(sfd - b_dist, 1.0)
-        sdd = f_dist + b_dist
+        bed, b_dist, f_dist, sdd = _geometry(alpha)
         theta_dt = self._thickness_half_angle(re, t_wall, f_dist, k_tol)
         theta_panel = self._panel_half_angle(re, f_dist, sdd, panel_width / 2.0)
         theta = max(min(theta_dt, theta_panel), 1e-6)
@@ -1230,6 +1253,7 @@ class RTCalculator:
 
         wae_width = self.estimate_wae_width(cap, t_wall)
         panel_height_ok = True if panel_height is None else (panel_height >= wae_width - 1e-9)
+        f_min_applied = self.calculate_f_min(focal_size, b_dist, testing_class, t_wall)
 
         return {
             "n_panel": n_final,
@@ -1245,6 +1269,7 @@ class RTCalculator:
             "iterations": iterations,
             "panel_height_ok": panel_height_ok,
             "wae_width_mm": wae_width,
+            "f_min_applied": f_min_applied,
         }
 
     def evaluate_exposure_comparison(self, n_graph, n_panel, n_applied):

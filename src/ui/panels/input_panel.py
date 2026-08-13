@@ -160,12 +160,31 @@ class InputPanelMixin:
         self.txt_bgap.textChanged.connect(self.update_calculations)
         self.lbl_bgap = grp_inputs_layout.addRow(self.trans.get("bgap"), self.txt_bgap)
 
+        # User-provided geometry overrides (digital, blank = auto)
+        self.lbl_f_source = QLabel(self.trans.get("source_dist"))
+        self.txt_f_source = QLineEdit()
+        self.txt_f_source.setValidator(QDoubleValidator(1.0, 5000.0, 1))
+        self.txt_f_source.setPlaceholderText(self.trans.get("auto_calc"))
+        self.txt_f_source.textChanged.connect(self.update_calculations)
+        grp_inputs_layout.addRow(self.lbl_f_source, self.txt_f_source)
+
+        self.lbl_b_object = QLabel(self.trans.get("object_dist"))
+        self.txt_b_object = QLineEdit()
+        self.txt_b_object.setValidator(QDoubleValidator(0.0, 5000.0, 1))
+        self.txt_b_object.setPlaceholderText(self.trans.get("auto_calc"))
+        self.txt_b_object.textChanged.connect(self.update_calculations)
+        grp_inputs_layout.addRow(self.lbl_b_object, self.txt_b_object)
+
     def _retranslate_input_panel(self):
         labels = {
             "lbl_std_od": "std_pipe_od",
             "lbl_custom_od": "custom_pipe_od",
             "lbl_std_t": "std_nominal_t",
             "lbl_custom_t": "custom_nominal_t",
+            "lbl_f_source": "source_dist",
+            "lbl_b_object": "object_dist",
         }
         for attr, key in labels.items():
             getattr(self, attr).setText(self.trans.get(key))
+        self.txt_f_source.setPlaceholderText(self.trans.get("auto_calc"))
+        self.txt_b_object.setPlaceholderText(self.trans.get("auto_calc"))

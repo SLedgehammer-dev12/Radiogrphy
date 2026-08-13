@@ -177,6 +177,10 @@ class Translation:
                 "applied_sfd": "Uygulanan SFD (mm):",
                 "applied_time": "Uygulanan Poz Süresi (sn):",
                 "applied_wire": "Uygulanan Tel No (W-No):",
+                "base_multiplier": "Baz Poz Çarpanı:",
+                "source_dist": "Kaynak-Malzeme Mesafesi (f) (mm):",
+                "object_dist": "Malzeme-Dedektör Mesafesi (b) (mm):",
+                "auto_calc": "boş = otomatik hesap",
                 "applied_duplex": "Uygulanan Duplex No (D-No):",
                 "applied_quality": "Uygulanan Yoğunluk / SNR:",
                 "applied_film_class": "Uygulanan Film Sınıfı:",
@@ -218,6 +222,7 @@ class Translation:
                 "tt_duplex": "ISO 19232-5 & ISO 17636-2 Madde 6.6 Tablo 3: Görüntü kalitesi için gereken asgari ikili tel (Duplex Wire) çözünürlük numarasıdır.",
                 "tt_quality_target": "ISO 17636-1 Madde 5.3 (Analog Film yoğunluğu: Sınıf B için >=2.3) veya ISO 17636-2 Madde 6.8 (Asgari SNR_N: Sınıf B için >=130) hedefidir.",
                 "tt_calc_time": "Zayıflatma katsayısı (mu) ve efektif kalınlık (w_eff) kullanılarak hesaplanan teorik pozlama süresidir. Chart Kaynağı seçiliyse üretici poz tablosu (SCRATA R-Factor / Type X) kullanılır.",
+                "tt_base_multiplier": "Model varsayımlarından sapan saha koşullarını (film partisi, banyo kimyası, dedektör yaşlanması, malzeme bileşimi) telafi etmek için poz süresini ölçekler. 1.0 = model değerini değiştirmez.",
                 "tt_detector_quality": "ISO 17636-1 Tablo 2 (Analog film sınıfı) veya ISO 17636-2 Tablo B.1/B.2 (Dijital panel asgari SRb çözünürlüğü) gereksinimidir.",
                 
                 # Sketch names
@@ -398,6 +403,10 @@ class Translation:
                 "applied_activity": "Applied Activity (Ci):",
                 "applied_sfd": "Applied SFD (mm):",
                 "applied_time": "Applied Time (sec):",
+                "base_multiplier": "Base Exposure Multiplier:",
+                "source_dist": "Source-to-Object Distance (f) (mm):",
+                "object_dist": "Object-to-Detector Distance (b) (mm):",
+                "auto_calc": "blank = auto calculate",
                 "applied_wire": "Applied Wire No (W-No):",
                 "applied_duplex": "Applied Duplex No (D-No):",
                 "applied_quality": "Applied Density / SNR:",
@@ -440,6 +449,7 @@ class Translation:
                 "tt_duplex": "ISO 19232-5 & ISO 17636-2 Clause 6.6 Table 3: Required minimum duplex wire resolution number for image quality.",
                 "tt_quality_target": "ISO 17636-1 Clause 5.3 (Analog film density: >=2.3 for Class B) or ISO 17636-2 Clause 6.8 (Min SNR_N: >=130 for Class B).",
                 "tt_calc_time": "Theoretical exposure time calculated using attenuation coefficient (mu) and effective thickness (w_eff). When Chart Source is active, manufacturer exposure chart (SCRATA R-Factor / Type X) is used instead.",
+                "tt_base_multiplier": "Scales the exposure time to compensate for field conditions deviating from model assumptions (film batch, chemistry, detector ageing, material composition). 1.0 keeps the model value unchanged.",
                 "tt_detector_quality": "ISO 17636-1 Table 2 (Analog film system class) or ISO 17636-2 Table B.1/B.2 (Digital panel min SRb resolution) requirement.",
                 
                 # Sketch names

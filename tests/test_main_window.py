@@ -66,3 +66,83 @@ class TestMainWindowInit(unittest.TestCase):
                 self.assertEqual(len(sizes), 3)
                 return
         self.fail("Vertical QSplitter with 3 widgets not found")
+
+    def test_std_figure_input_combo_populated(self):
+        # The input-panel "Standart ISO Şekli" combo must be populated and in
+        # sync with the standard sketch tab combo.
+        combo = self.win.cmb_std_figure
+        tab = self.win.cmb_std_figure_tab
+        self.assertGreater(combo.count(), 0, "Input panel std figure combo is empty")
+        self.assertGreater(tab.count(), 0, "Standard tab std figure combo is empty")
+        self.assertEqual(combo.count(), tab.count())
+        for i in range(combo.count()):
+            self.assertEqual(combo.itemText(i), tab.itemText(i))
+            self.assertEqual(combo.itemData(i), tab.itemData(i))
+        self.assertEqual(combo.currentData(), tab.currentData())
+
+    def test_std_figure_sync_on_geometry_change(self):
+        # Changing geometry in the input panel must update the tab combo too.
+        combo = self.win.cmb_std_figure
+        tab = self.win.cmb_std_figure_tab
+        # Switch to SWSI geometry (index 1)
+        idx_swsi = self.win.cmb_geometry.findText("SWSI")
+        if idx_swsi < 0:
+            idx_swsi = 1
+        self.win.cmb_geometry.setCurrentIndex(idx_swsi)
+        self.win.update_std_figure_list()
+        self.assertGreater(combo.count(), 0)
+        self.assertEqual(combo.count(), tab.count())
+        self.assertEqual(combo.currentData(), tab.currentData())
+
+    def test_geometry_override_fields_exist(self):
+        self.assertTrue(hasattr(self.win, "txt_f_source"))
+        self.assertTrue(hasattr(self.win, "txt_b_object"))
+        self.assertTrue(hasattr(self.win, "lbl_f_source"))
+        self.assertTrue(hasattr(self.win, "lbl_b_object"))
+
+    def test_base_multiplier_default_is_one(self):
+        self.assertEqual(self.win.get_base_multiplier(), 1.0)
+        self.win.txt_base_multiplier.setText("1.5")
+        self.assertEqual(self.win.get_base_multiplier(), 1.5)
+        self.win.txt_base_multiplier.setText("0")
+        self.assertEqual(self.win.get_base_multiplier(), 1.0)
+        self.win.txt_base_multiplier.setText("250.0")
+        self.assertEqual(self.win.get_base_multiplier(), 100.0)
+        self.win.txt_base_multiplier.setText("")
+        self.assertEqual(self.win.get_base_multiplier(), 1.0)
+        self.win.txt_base_multiplier.setText("1.0")
+
+    def test_geometry_override_parsing(self):
+        f, b = self.win.get_geometry_override_inputs()
+        self.assertIsNone(f)
+        self.assertIsNone(b)
+        self.win.txt_f_source.setText("700")
+        self.win.txt_b_object.setText("20")
+        f, b = self.win.get_geometry_override_inputs()
+        self.assertEqual(f, 700.0)
+        self.assertEqual(b, 20.0)
+        self.win.txt_f_source.setText("0")
+        f, b = self.win.get_geometry_override_inputs()
+        self.assertIsNone(f)
+        self.win.txt_f_source.setText("")
+        self.win.txt_b_object.setText("")
+
+    def test_draw_setup_respects_light_theme(self):
+        # draw_setup must honour the theme instead of forcing dark colours
+        self.win.rad_digital.setChecked(True)
+        self.win.is_dark_theme = False
+        self.win.canvas.draw_setup(50.0, 5.0, 3.0, "dwsi", 600.0, self.win.trans, is_dark=False)
+        bg = self.win.canvas.axes.get_facecolor()
+        self.assertGreater(sum(bg[:3]), 2.0, f"Expected light background, got {bg}")
+        self.win.canvas.draw_setup(50.0, 5.0, 3.0, "dwsi", 600.0, self.win.trans, is_dark=True)
+        bg = self.win.canvas.axes.get_facecolor()
+        self.assertLess(sum(bg[:3]), 1.0, f"Expected dark background, got {bg}")
+
+    def test_toggle_theme_changes_setup_canvas(self):
+        self.win.is_dark_theme = True
+        self.win.toggle_theme()
+        self.assertFalse(self.win.is_dark_theme)
+        bg = self.win.canvas.axes.get_facecolor()
+        self.assertGreater(sum(bg[:3]), 2.0, f"Light theme should yield light background, got {bg}")
+        self.win.toggle_theme()
+        self.assertTrue(self.win.is_dark_theme)

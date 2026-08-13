@@ -84,6 +84,12 @@ class MainWindow(QMainWindow,
         self.txt_bed.setVisible(False)
         self.txt_bgap.setVisible(False)
 
+        # Hide user geometry overrides until digital + relevant tech is confirmed
+        self.lbl_f_source.setVisible(True)
+        self.txt_f_source.setVisible(True)
+        self.lbl_b_object.setVisible(True)
+        self.txt_b_object.setVisible(True)
+
         # Trigger initial calculations
         if not self._restored_settings:
             self.update_calculations()
@@ -144,6 +150,9 @@ class MainWindow(QMainWindow,
             "txt_panel_height": "200.0",
             "txt_panel_overlap": "",
             "txt_app_exposures": "6",
+            "txt_base_multiplier": "1.0",
+            "txt_f_source": "",
+            "txt_b_object": "",
         }
         for le_name, default_val in line_edits.items():
             w = getattr(self, le_name, None)
@@ -207,7 +216,8 @@ class MainWindow(QMainWindow,
             "txt_custom_od", "txt_custom_t", "txt_cap", "txt_d",
             "txt_app_sfd", "txt_output", "txt_app_activity", "txt_base_e",
             "txt_panel_width", "txt_panel_height", "txt_panel_overlap",
-            "txt_app_exposures",
+            "txt_app_exposures", "txt_base_multiplier", "txt_f_source",
+            "txt_b_object",
         ]
         for le_name in line_edits:
             val = s.value(f"form/{le_name}")
@@ -320,6 +330,14 @@ class MainWindow(QMainWindow,
         self.txt_app_sfd.setValidator(QDoubleValidator(10.0, 5000.0, 1))
         self.txt_app_sfd.textChanged.connect(self.update_calculations)
         grp_exposure_layout.addRow(self.lbl_app_sfd, self.txt_app_sfd)
+
+        # Base exposure multiplier (field adjustment for model/conditions deviation)
+        self.lbl_base_multiplier = QLabel(self.trans.get("base_multiplier"))
+        self.txt_base_multiplier = QLineEdit("1.0")
+        self.txt_base_multiplier.setValidator(QDoubleValidator(0.01, 100.0, 2))
+        self.txt_base_multiplier.setToolTip(self.trans.get("tt_base_multiplier"))
+        self.txt_base_multiplier.textChanged.connect(self.update_calculations)
+        grp_exposure_layout.addRow(self.lbl_base_multiplier, self.txt_base_multiplier)
 
         # Tube Amperage (mA) - visible for X-ray
         self.lbl_output = QLabel(self.trans.get("amperage"))
@@ -590,9 +608,9 @@ class MainWindow(QMainWindow,
         tab_std_layout.setContentsMargins(2, 2, 2, 2)
         self.std_canvas = StandardSchematicCanvas(tab_std_widget, width=5, height=3, dpi=100)
         tab_std_layout.addWidget(self.std_canvas)
-        self.cmb_std_figure = QComboBox()
-        self.cmb_std_figure.currentIndexChanged.connect(self.on_std_figure_changed)
-        tab_std_layout.addWidget(self.cmb_std_figure)
+        self.cmb_std_figure_tab = QComboBox()
+        self.cmb_std_figure_tab.currentIndexChanged.connect(self.on_std_figure_tab_changed)
+        tab_std_layout.addWidget(self.cmb_std_figure_tab)
         self.tab_sketch.addTab(tab_std_widget, self.trans.get("tab_standard"))
 
         sketch_layout.addWidget(self.tab_sketch)
@@ -673,6 +691,12 @@ class MainWindow(QMainWindow,
         self.txt_panel_overlap.setVisible(is_digital)
         self.lbl_app_exposures.setVisible(is_digital)
         self.txt_app_exposures.setVisible(is_digital)
+
+        # User geometry overrides visibility (digital only)
+        self.lbl_f_source.setVisible(is_digital)
+        self.txt_f_source.setVisible(is_digital)
+        self.lbl_b_object.setVisible(is_digital)
+        self.txt_b_object.setVisible(is_digital)
         
         # update target label name
         target_name = "target_snr" if is_digital else "optical_density"
@@ -812,8 +836,32 @@ class MainWindow(QMainWindow,
                 break
         if not found:
             self.cmb_std_figure.setCurrentIndex(0)
-            
+
+        self._sync_std_figure_tab()
+
         self.cmb_std_figure.blockSignals(False)
+        self.on_std_figure_changed()
+
+    def _sync_std_figure_tab(self):
+        tab = getattr(self, "cmb_std_figure_tab", None)
+        if tab is None:
+            return
+        tab.blockSignals(True)
+        tab.clear()
+        for i in range(self.cmb_std_figure.count()):
+            tab.addItem(self.cmb_std_figure.itemText(i), self.cmb_std_figure.itemData(i))
+        tab.setCurrentIndex(self.cmb_std_figure.currentIndex())
+        tab.blockSignals(False)
+
+    def on_std_figure_tab_changed(self):
+        tab = getattr(self, "cmb_std_figure_tab", None)
+        if tab is None:
+            return
+        idx = self.cmb_std_figure.findData(tab.currentData())
+        if idx >= 0 and idx != self.cmb_std_figure.currentIndex():
+            self.cmb_std_figure.blockSignals(True)
+            self.cmb_std_figure.setCurrentIndex(idx)
+            self.cmb_std_figure.blockSignals(False)
         self.on_std_figure_changed()
 
     def on_std_figure_changed(self):
@@ -968,6 +1016,8 @@ class MainWindow(QMainWindow,
         self.lbl_app_time.setText(self.trans.get("applied_time"))
         self.lbl_app_kv.setText(self.trans.get("applied_kv"))
         self.lbl_app_activity.setText(self.trans.get("applied_activity"))
+        self.lbl_base_multiplier.setText(self.trans.get("base_multiplier"))
+        self.txt_base_multiplier.setToolTip(self.trans.get("tt_base_multiplier"))
 
         if self.cmb_iqi_type.currentData() == "step_hole":
             self.lbl_app_wire.setText(self.trans.get("applied_step_hole"))
@@ -1055,6 +1105,9 @@ class MainWindow(QMainWindow,
             (self.txt_dd, 1.0, 1000.0),
             (self.txt_bed, 0.0, 500.0),
             (self.txt_bgap, 0.0, 100.0),
+            (self.txt_f_source, 1.0, 5000.0),
+            (self.txt_b_object, 0.0, 5000.0),
+            (self.txt_base_multiplier, 0.01, 100.0),
             (self.txt_defect_length, 0.0, 1000.0),
             (self.txt_defect_width, 0.0, 100.0),
             (self.txt_defect_accum, 0.0, 300.0),
@@ -1160,6 +1213,31 @@ class MainWindow(QMainWindow,
         app_exposures = max(1, app_exposures)
         return panel_width, panel_height, overlap, app_exposures
 
+    def get_geometry_override_inputs(self):
+        """
+        Parses the user-provided geometry overrides.
+        Returns (f_source, b_object) where blank entries are None (auto mode).
+        """
+        def _float_opt(widget):
+            try:
+                val = float(widget.text().strip().replace(",", "."))
+            except ValueError:
+                return None
+            if val <= 0.0:
+                return None
+            return val
+        return _float_opt(self.txt_f_source), _float_opt(self.txt_b_object)
+
+    def get_base_multiplier(self):
+        """Returns the base exposure multiplier (default 1.0)."""
+        try:
+            val = float(self.txt_base_multiplier.text().strip().replace(",", "."))
+        except ValueError:
+            return 1.0
+        if val <= 0.0:
+            return 1.0
+        return min(val, 100.0)
+
     def update_calculations(self):
         # 1. Fetch values
         od, t, cap, d, sfd, output_val, base_e, detector_type, film_class_used, chart_source = self.get_form_values()
@@ -1254,11 +1332,30 @@ class MainWindow(QMainWindow,
         exposures_ok = None
         if tech == "digital":
             panel_width, panel_height, overlap_pct, n_applied = self.get_panel_inputs()
+            f_override, b_override = self.get_geometry_override_inputs()
             panel_res = self.calc.calculate_panel_exposures(
                 od, t, geometry, testing_class, panel_width,
                 panel_height=panel_height, cap=cap, sfd=sfd, bgap=bgap,
                 overlap_percent=overlap_pct, focal_size=d, std_figure=std_figure,
+                b_object=b_override, f_source=f_override,
             )
+            if f_override is not None and b_override is not None:
+                sum_dist = f_override + b_override
+                if abs(sum_dist - sfd) > 5.0:
+                    if self.trans.language == "tr":
+                        warnings.append(f"UYARI: Ölçülen geometri (f+b={sum_dist:.1f} mm) uygulanan SFD'den ({sfd:.1f} mm) farklı.")
+                    else:
+                        warnings.append(f"WARNING: Measured geometry (f+b={sum_dist:.1f} mm) differs from applied SFD ({sfd:.1f} mm).")
+            if b_override is not None and b_override < t:
+                if self.trans.language == "tr":
+                    warnings.append(f"UYARI: b ({b_override:.1f} mm) et kalınlığından (t={t:.1f} mm) küçük — ölçümü kontrol edin.")
+                else:
+                    warnings.append(f"WARNING: b ({b_override:.1f} mm) is smaller than the wall thickness (t={t:.1f} mm) — check the measurement.")
+            if f_override is not None and f_override < panel_res["f_min_applied"]:
+                if self.trans.language == "tr":
+                    warnings.append(f"UYARI: f ({f_override:.1f} mm) ISO 17636-2 Madde 7.6 geometrik sınırı olan f_min ({panel_res['f_min_applied']:.1f} mm) altında — f_min kullanıldı.")
+                else:
+                    warnings.append(f"WARNING: f ({f_override:.1f} mm) is below the Clause 7.6 geometric limit f_min ({panel_res['f_min_applied']:.1f} mm) — f_min applied.")
             n_panel = panel_res["n_panel"]
             cmp_res = self.calc.evaluate_exposure_comparison(exposures, n_panel, n_applied)
             n_required = cmp_res["n_required"]
@@ -1380,6 +1477,13 @@ class MainWindow(QMainWindow,
         if sfd_comp_target is not None:
             # apply compensation multiplier
             raw_time = raw_time * time_multiplier
+            min_calc = int(raw_time // 60)
+            sec_calc = int(raw_time % 60)
+
+        # Base exposure multiplier: scales the model time for field conditions
+        base_multiplier = self.get_base_multiplier()
+        if base_multiplier != 1.0:
+            raw_time = raw_time * base_multiplier
             min_calc = int(raw_time // 60)
             sec_calc = int(raw_time % 60)
 
@@ -1654,6 +1758,7 @@ class MainWindow(QMainWindow,
         self.last_calculated["exposures_applied"] = n_applied
         self.last_calculated["required_exposures"] = n_required
         self.last_calculated["exposures_ok"] = exposures_ok
+        self.last_calculated["base_multiplier"] = base_multiplier
         if tech == "digital":
             self.last_calculated["required_snr"] = target_snr_val
         else:
@@ -1670,7 +1775,7 @@ class MainWindow(QMainWindow,
             self.lbl_dynamic_standard_ref.setText(f"{self.trans.get('standard_fig')} {self.cmb_std_figure.currentText()}")
 
         # Update weld sketch canvas
-        self.canvas.draw_setup(od, t, cap, geometry, sfd, self.trans)
+        self.canvas.draw_setup(od, t, cap, geometry, sfd, self.trans, self.is_dark_theme)
 
         # Automatically check compliance
         self.check_procedure_compliance()
@@ -1947,6 +2052,7 @@ class MainWindow(QMainWindow,
             "duplex_iqi": duplex_str if tech == "digital" else "N/A",
             "quality_target": target_quality,
             "calc_time": calc_time,
+            "base_multiplier": self.last_calculated.get("base_multiplier", 1.0),
             "detector_quality": self.out_labels["detector_quality"][1].text(),
             "filter_recommendation": self.out_labels["filter_recommendation"][1].text()
         }

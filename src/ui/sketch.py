@@ -21,12 +21,10 @@ class WeldSketchCanvas(FigureCanvas):
         self.fig.patch.set_facecolor('#1e1e2e') # Sleek dark mode facecolor by default
         self.axes.set_facecolor('#1e1e2e')
 
-    def draw_setup(self, OD, t, cap, geometry, sfd, lang_obj):
+    def draw_setup(self, OD, t, cap, geometry, sfd, lang_obj, is_dark=True):
         self.axes.clear()
         
         # Detect background color preference based on theme
-        # We can dynamically style with dark/light themes
-        is_dark = True # default
         bg_color = '#1e1e2e' if is_dark else '#ffffff'
         text_color = '#ffffff' if is_dark else '#000000'
         pipe_color = '#89b4fa' if is_dark else '#1b5e20'
