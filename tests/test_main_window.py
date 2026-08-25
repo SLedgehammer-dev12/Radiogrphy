@@ -237,9 +237,9 @@ class TestMainWindowInit(unittest.TestCase):
         self.win.check_procedure_compliance()
         self.assertIn("DEĞİL", self.win.lbl_compliance_result.text())
 
-        # Set applied exposures to 6 (which is sufficient)
-        self.win.txt_app_exposures.setText("6")
+        # Set applied exposures to 12 (which is >= required 10)
+        self.win.txt_app_exposures.setText("12")
         self.win.check_procedure_compliance()
         # Exposure check should pass
         res_text = self.win.lbl_compliance_details.text()
-        self.assertIn("Poz Sayısı", res_text)
+        self.assertIn("Poz Sayısı Uygun", res_text)
