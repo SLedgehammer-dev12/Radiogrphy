@@ -269,3 +269,17 @@ class AppState:
 
     def get_text(self, key):
         return self.trans.get(key)
+
+    def check_updates(self, callback=None):
+        """Asynchronously checks for updates and invokes callback with result dict."""
+        import threading
+        from core.updater import UpdateChecker
+
+        def _worker():
+            checker = UpdateChecker()
+            res = checker.check()
+            if callback:
+                callback(res)
+
+        t = threading.Thread(target=_worker, daemon=True)
+        t.start()

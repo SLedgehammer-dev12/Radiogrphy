@@ -59,6 +59,8 @@ class ProcedureComplianceChecker:
                 "overlap_fail": "FİLM BİNDİRME MESAFESİ YETERSİZ! Uygulanan: {:.1f} mm < Asgari: 10.0 mm.",
                 "exp_pass": "Poz Sayısı Uygun: Uygulanan {applied} >= Gerekli {required} (Grafik/Standart: {graph}, Panel: {panel}).",
                 "exp_fail": "POZ SAYISI UYGUN DEĞİL! Uygulanan: {applied} < Gerekli: {required} (Grafik/Standart: {graph}, Panel: {panel}).",
+                "exp_pass_analog": "Poz Sayısı Uygun: Uygulanan {applied} >= Gerekli {required} (Standart/Grafik).",
+                "exp_fail_analog": "POZ SAYISI UYGUN DEĞİL! Uygulanan: {applied} < Gerekli: {required} (Standart/Grafik).",
             },
             "en": {
                 "voltage_pass": "Tube Voltage Compliant: {:.1f} kV <= Max {:.1f} kV limit.",
@@ -98,6 +100,8 @@ class ProcedureComplianceChecker:
                 "overlap_fail": "FILM OVERLAP INSUFFICIENT! Applied: {:.1f} mm < Min: 10.0 mm.",
                 "exp_pass": "Exposure Count Compliant: Applied {applied} >= Required {required} (Graph/Standard: {graph}, Panel: {panel}).",
                 "exp_fail": "EXPOSURE COUNT NON-COMPLIANT! Applied: {applied} < Required: {required} (Graph/Standard: {graph}, Panel: {panel}).",
+                "exp_pass_analog": "Exposure Count Compliant: Applied {applied} >= Required {required} (Standard/Graph).",
+                "exp_fail_analog": "EXPOSURE COUNT NON-COMPLIANT! Applied: {applied} < Required: {required} (Standard/Graph).",
             }
         }
 
@@ -314,13 +318,13 @@ class ProcedureComplianceChecker:
             # We don't mark is_compliant as False because time deviation is warning-only
             checks.append({"name": "time", "status": True, "details": l_msgs["time_diff"].format(calc_min, calc_sec, app_min, app_sec, diff*100)})
 
-        # 12. Exposure Count Check (Digital only — panel coverage vs standard/graph)
-        if tech == "digital":
-            req_exposures = calculated.get("required_exposures")
-            if req_exposures is not None:
+        # 12. Exposure Count Check (Digital & Analog)
+        req_exposures = calculated.get("required_exposures")
+        n_applied = applied.get("applied_exposures", 0) or 0
+        if req_exposures is not None and n_applied > 0:
+            if tech == "digital":
                 n_graph = calculated.get("exposures_graph", 0) or 0
                 n_panel = calculated.get("exposures_panel", 0) or 0
-                n_applied = applied.get("applied_exposures", 0) or 0
                 n_req = max(int(req_exposures), int(n_graph), int(n_panel))
                 if n_applied >= n_req:
                     checks.append({
@@ -332,6 +336,19 @@ class ProcedureComplianceChecker:
                     checks.append({
                         "name": "exposures", "status": False,
                         "details": l_msgs["exp_fail"].format(applied=n_applied, required=n_req, graph=n_graph, panel=n_panel)
+                    })
+            else:
+                n_req = int(req_exposures)
+                if n_applied >= n_req:
+                    checks.append({
+                        "name": "exposures", "status": True,
+                        "details": l_msgs.get("exp_pass_analog", l_msgs["exp_pass"]).format(applied=n_applied, required=n_req)
+                    })
+                else:
+                    is_compliant = False
+                    checks.append({
+                        "name": "exposures", "status": False,
+                        "details": l_msgs.get("exp_fail_analog", l_msgs["exp_fail"]).format(applied=n_applied, required=n_req)
                     })
 
         return {

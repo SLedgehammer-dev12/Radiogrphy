@@ -522,6 +522,7 @@ class MainWindow(QMainWindow,
         grp_outputs.setLayout(grp_outputs_layout)
 
         self.out_labels = {}
+        self.out_rows = {}
         self.info_buttons = {}
         out_fields = [
             "w_nom", "w_eff", "u_max", "f_min", "sfd_min",
@@ -575,6 +576,7 @@ class MainWindow(QMainWindow,
             grp_outputs_layout.addWidget(row_widget)
 
             self.out_labels[name] = (lbl, val)
+            self.out_rows[name] = row_widget
 
         grp_outputs_layout.addStretch()
         outputs_layout.addWidget(grp_outputs)
@@ -677,8 +679,6 @@ class MainWindow(QMainWindow,
             else:
                 # Changed from GBq to Ci
                 self.txt_app_activity.blockSignals(True)
-                self.txt_app_activity.setText(f"{val / 37.0:.1f}")
-                self.txt_app_activity.blockSignals(False)
         except ValueError:
             pass
         self.update_calculations()
@@ -692,6 +692,39 @@ class MainWindow(QMainWindow,
             self.lbl_bgap.setVisible(is_curved)
             self.txt_bgap.setVisible(is_curved)
         self.update_calculations()
+
+    def _update_output_visibility(self):
+        if not hasattr(self, 'out_rows') or not self.out_rows:
+            return
+        is_digital = self.rad_digital.isChecked()
+        is_xray = (self.cmb_source.currentIndex() == 0)
+
+        # u_max only visible for X-Ray (isotopes do not have tube voltage)
+        if "u_max" in self.out_rows:
+            self.out_rows["u_max"].setVisible(is_xray)
+
+        # duplex_iqi only visible for digital
+        if "duplex_iqi" in self.out_rows:
+            self.out_rows["duplex_iqi"].setVisible(is_digital)
+
+        # exposures_panel only visible for digital
+        if "exposures_panel" in self.out_rows:
+            self.out_rows["exposures_panel"].setVisible(is_digital)
+
+        # exposures_applied and exposures_check visible for both analog & digital
+        if "exposures_applied" in self.out_rows:
+            self.out_rows["exposures_applied"].setVisible(True)
+        if "exposures_check" in self.out_rows:
+            self.out_rows["exposures_check"].setVisible(True)
+
+        # Dynamic output labels
+        if "quality_target" in self.out_labels:
+            target_name = "target_snr" if is_digital else "optical_density"
+            self.out_labels["quality_target"][0].setText(self.trans.get(target_name))
+
+        if "detector_quality" in self.out_labels:
+            dq_name = "detector_quality" if is_digital else "film_class_req"
+            self.out_labels["detector_quality"][0].setText(self.trans.get(dq_name))
 
     def on_tech_changed(self):
         is_digital = self.rad_digital.isChecked()
@@ -721,8 +754,10 @@ class MainWindow(QMainWindow,
         self.txt_panel_height.setVisible(is_digital)
         self.lbl_panel_overlap.setVisible(is_digital)
         self.txt_panel_overlap.setVisible(is_digital)
-        self.lbl_app_exposures.setVisible(is_digital)
-        self.txt_app_exposures.setVisible(is_digital)
+
+        # Applied exposures input is visible for both analog and digital!
+        self.lbl_app_exposures.setVisible(True)
+        self.txt_app_exposures.setVisible(True)
 
         # User geometry overrides visibility (digital only)
         self.lbl_f_source.setVisible(is_digital)
@@ -744,10 +779,6 @@ class MainWindow(QMainWindow,
             self.lbl_bgap.setVisible(is_curved)
             self.txt_bgap.setVisible(is_curved)
         
-        # update target label name
-        target_name = "target_snr" if is_digital else "optical_density"
-        self.out_labels["quality_target"][0].setText(self.trans.get(target_name))
-        
         # Also update procedure compliance label and default value
         if is_digital:
             self.lbl_app_quality.setText(self.trans.get("applied_quality") + " (SNR_N):")
@@ -766,6 +797,7 @@ class MainWindow(QMainWindow,
             except ValueError:
                 self.txt_app_quality.setText("2.5")
 
+        self._update_output_visibility()
         self.update_calculations()
 
     def on_source_changed(self):
@@ -1258,6 +1290,21 @@ class MainWindow(QMainWindow,
 
         return od, t, cap, d, sfd, output_val, base_e, detector_type, film_class_used, chart_source
 
+    def get_applied_exposures(self):
+        """
+        Parses the user-entered applied exposures count.
+        Returns int >= 0 (default 0 if empty/invalid).
+        """
+        if not hasattr(self, 'txt_app_exposures'):
+            return 0
+        text = self.txt_app_exposures.text().strip().replace(",", ".")
+        if not text:
+            return 0
+        try:
+            return max(0, int(float(text)))
+        except (ValueError, TypeError):
+            return 0
+
     def get_panel_inputs(self):
         """
         Parses the flat-panel DDA inputs. Blank overlap falls back to 10%.
@@ -1273,11 +1320,9 @@ class MainWindow(QMainWindow,
         panel_height = max(10.0, _float(self.txt_panel_height, 200.0))
         overlap = _float(self.txt_panel_overlap, 10.0)
         overlap = max(0.0, min(overlap, 50.0))
-        try:
-            app_exposures = int(_float(self.txt_app_exposures, 6))
-        except (ValueError, TypeError):
+        app_exposures = self.get_applied_exposures()
+        if app_exposures <= 0:
             app_exposures = 6
-        app_exposures = max(1, app_exposures)
         return panel_width, panel_height, overlap, app_exposures
 
     def get_geometry_override_inputs(self):
@@ -1394,11 +1439,11 @@ class MainWindow(QMainWindow,
 
         # Panel-coverage minimum exposures (ISO 17636-2:2022 Clauses 7.6/7.8, digital only)
         n_panel = None
-        n_applied = None
+        n_applied = self.get_applied_exposures()
         n_required = exposures
         exposures_ok = None
         if tech == "digital":
-            panel_width, panel_height, overlap_pct, n_applied = self.get_panel_inputs()
+            panel_width, panel_height, overlap_pct, _ = self.get_panel_inputs()
             f_override, b_override = self.get_geometry_override_inputs()
             panel_res = self.calc.calculate_panel_exposures(
                 od, t, geometry, testing_class, panel_width,
@@ -1424,9 +1469,10 @@ class MainWindow(QMainWindow,
                 else:
                     warnings.append(f"WARNING: f ({f_override:.1f} mm) is below the Clause 7.6 geometric limit f_min ({panel_res['f_min_applied']:.1f} mm) — f_min applied.")
             n_panel = panel_res["n_panel"]
-            cmp_res = self.calc.evaluate_exposure_comparison(exposures, n_panel, n_applied)
+            cmp_res = self.calc.evaluate_exposure_comparison(exposures, n_panel, n_applied if n_applied > 0 else max(exposures, n_panel))
             n_required = cmp_res["n_required"]
-            exposures_ok = cmp_res["is_sufficient"]
+            if n_applied > 0:
+                exposures_ok = (n_applied >= n_required)
             if panel_res["limiting_factor"] == "panel":
                 if self.trans.language == "tr":
                     warnings.append(f"BİLGİ: Panel aktif genişliği ({panel_width:.0f} mm) poz sayısını sınırlıyor (θ={panel_res['theta_panel_deg']:.1f}°).")
@@ -1437,11 +1483,21 @@ class MainWindow(QMainWindow,
                     warnings.append(f"UYARI: Panel aktif yüksekliği ({panel_height:.0f} mm) WAE genişliğini ({panel_res['wae_width_mm']:.1f} mm) karşılamıyor.")
                 else:
                     warnings.append(f"WARNING: Panel active height ({panel_height:.0f} mm) is smaller than WAE width ({panel_res['wae_width_mm']:.1f} mm).")
-            if not cmp_res["is_sufficient"]:
+            if n_applied > 0 and not exposures_ok:
                 if self.trans.language == "tr":
                     warnings.append(f"UYARI: Uygulanan poz sayısı ({n_applied}) gerekli minimumu ({n_required}) karşılamıyor.")
                 else:
                     warnings.append(f"WARNING: Applied exposures ({n_applied}) do not meet the required minimum ({n_required}).")
+        else:
+            # Analog mode
+            n_required = exposures
+            if n_applied > 0:
+                exposures_ok = (n_applied >= n_required)
+                if not exposures_ok:
+                    if self.trans.language == "tr":
+                        warnings.append(f"UYARI: Uygulanan poz sayısı ({n_applied}) standartın gerektirdiği asgari poz sayısını ({n_required}) karşılamıyor.")
+                    else:
+                        warnings.append(f"WARNING: Applied exposures ({n_applied}) do not meet the required minimum ({n_required}).")
 
         # Parse kV input for X-ray early
         if source == "x_ray":
@@ -1753,24 +1809,23 @@ class MainWindow(QMainWindow,
         self.out_labels["sfd_min"][1].setText(f"{sfd_min:.1f} mm")
         self.out_labels["ug"][1].setText(f"{ug:.3f} mm")
         self.out_labels["req_exposures"][1].setText(f"{exposures}")
-        if n_panel is None:
-            self.out_labels["exposures_panel"][1].setText("N/A")
-            self.out_labels["exposures_applied"][1].setText("N/A")
-            self.out_labels["exposures_check"][1].setText("N/A")
-        else:
+
+        if n_panel is not None:
             self.out_labels["exposures_panel"][1].setText(f"{n_panel}")
+        else:
+            self.out_labels["exposures_panel"][1].setText("N/A")
+
+        if n_applied > 0:
             self.out_labels["exposures_applied"][1].setText(f"{n_applied}")
             if exposures_ok:
-                if self.trans.language == "tr":
-                    check_str = f"UYGUN (≥ {n_required})"
-                else:
-                    check_str = f"OK (≥ {n_required})"
+                check_str = f"UYGUN (≥ {n_required})" if self.trans.language == "tr" else f"OK (≥ {n_required})"
             else:
-                if self.trans.language == "tr":
-                    check_str = f"UYGUN DEĞİL (< {n_required})"
-                else:
-                    check_str = f"NOT OK (< {n_required})"
+                check_str = f"UYGUN DEĞİL (< {n_required})" if self.trans.language == "tr" else f"NOT OK (< {n_required})"
             self.out_labels["exposures_check"][1].setText(check_str)
+        else:
+            self.out_labels["exposures_applied"][1].setText("-")
+            self.out_labels["exposures_check"][1].setText(f"≥ {n_required}")
+
         self.out_labels["single_wire_iqi"][1].setText(wire_str)
         
         if tech == "digital":
@@ -1787,6 +1842,8 @@ class MainWindow(QMainWindow,
                 chart_label = f" [{chart_source}]"
         self.out_labels["calc_time"][1].setText(f"{min_calc} min {sec_calc} sec{chart_label}")
         self.out_labels["detector_quality"][1].setText(detector_quality_str)
+
+        self._update_output_visibility()
 
         # Filter recommendation output
         filter_recs = self.calc.get_filter_recommendations(source, material, input_kv, testing_class)
@@ -1965,7 +2022,7 @@ class MainWindow(QMainWindow,
             "applied_srb": applied_srb,
             "applied_film_class": applied_film_class,
             "applied_overlap": applied_overlap,
-            "applied_exposures": self.get_panel_inputs()[3] if tech == "digital" else None
+            "applied_exposures": self.get_applied_exposures()
         }
 
         # Call procedure checker

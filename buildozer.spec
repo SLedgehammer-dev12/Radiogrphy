@@ -37,7 +37,7 @@ source.exclude_dirs = tests, bin, venv, __pycache__, .git, src/ui
 #source.exclude_patterns = license,images/*/*.jpg
 
 # (str) Application versioning (method 1)
-version = 1.4.0
+version = 1.4.1
 
 # (list) Application requirements
 # comma separated e.g. requirements = sqlite3,kivy

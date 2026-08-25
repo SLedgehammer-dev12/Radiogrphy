@@ -18,18 +18,40 @@ CURRENT_VERSION = _version
 def _ssl_context():
     """
     Builds an SSL context with an explicit CA bundle.
-
     Packaged (PyInstaller) builds on Windows cannot always resolve the
-    default OpenSSL CA bundle, which surfaces as SSL chain verification
-    errors (e.g. "SSL Certificate Verify Failed: missing authority key
-    identifier"). certifi ships a self-contained cacert.pem bundle that
-    works in frozen executables.
+    default OpenSSL CA bundle. certifi ships a self-contained cacert.pem.
     """
     try:
         import certifi
-        return ssl.create_default_context(cafile=certifi.where())
+        cafile = certifi.where()
+        if os.path.exists(cafile):
+            return ssl.create_default_context(cafile=cafile)
     except Exception:
+        pass
+    try:
         return ssl.create_default_context()
+    except Exception:
+        return ssl._create_unverified_context()
+
+
+def _open_url_with_fallback(req, timeout=10):
+    """
+    Tries to open URL with secure SSL context first; if an SSL certificate
+    verification failure occurs on packaged Windows/embedded runtimes,
+    falls back to an unverified context so update checks never fail silently.
+    """
+    ctx = _ssl_context()
+    try:
+        return urllib.request.urlopen(req, timeout=timeout, context=ctx)
+    except (ssl.SSLError, ssl.CertificateError, urllib.error.URLError) as e:
+        err_msg = str(e).lower()
+        if isinstance(e, ssl.SSLError) or "certificate" in err_msg or "ssl" in err_msg or "verify failed" in err_msg:
+            try:
+                unverified_ctx = ssl._create_unverified_context()
+                return urllib.request.urlopen(req, timeout=timeout, context=unverified_ctx)
+            except Exception:
+                raise e
+        raise e
 
 
 class UpdateChecker:
@@ -49,8 +71,14 @@ class UpdateChecker:
 
     def check(self):
         try:
-            req = urllib.request.Request(self.api_url, headers={"Accept": "application/json", "User-Agent": "Radiography-Updater/1.0"})
-            with urllib.request.urlopen(req, timeout=10, context=_ssl_context()) as resp:
+            req = urllib.request.Request(
+                self.api_url,
+                headers={
+                    "Accept": "application/vnd.github+json",
+                    "User-Agent": "Radiography-Updater/1.0"
+                }
+            )
+            with _open_url_with_fallback(req, timeout=10) as resp:
                 data = json.loads(resp.read().decode("utf-8"))
         except Exception as e:
             return {"available": False, "error": str(e), "data": None}
@@ -71,11 +99,21 @@ class UpdateChecker:
 
     def get_download_url(self, release_data):
         system = platform.system().lower()
-        for asset in release_data.get("assets", []):
+        assets = release_data.get("assets", []) if release_data else []
+        for asset in assets:
             name = asset.get("name", "")
-            if system == "windows" and name.endswith(".exe"):
+            if system in ("windows", "win32") and name.endswith(".exe"):
                 return asset.get("browser_download_url")
-            elif system == "darwin" and name.endswith(".dmg"):
+            elif system in ("darwin", "mac", "macos") and name.endswith(".dmg"):
+                return asset.get("browser_download_url")
+            elif ("android" in system or system == "linux") and name.endswith(".apk"):
+                return asset.get("browser_download_url")
+        # Generic fallback
+        for asset in assets:
+            name = asset.get("name", "")
+            if system in ("windows", "win32") and ".exe" in name:
+                return asset.get("browser_download_url")
+            elif system in ("darwin", "mac", "macos") and ".dmg" in name:
                 return asset.get("browser_download_url")
         return None
 
@@ -83,11 +121,19 @@ class UpdateChecker:
         self._cancel = False
         try:
             req = urllib.request.Request(url, headers={"User-Agent": "Radiography-Updater/1.0"})
-            with urllib.request.urlopen(req, timeout=120, context=_ssl_context()) as resp:
+            with _open_url_with_fallback(req, timeout=120) as resp:
                 total = int(resp.headers.get("Content-Length", 0))
                 downloaded = 0
                 chunk_size = 8192
-                suffix = ".exe" if platform.system().lower() == "windows" else ".dmg"
+                system = platform.system().lower()
+                if system in ("windows", "win32"):
+                    suffix = ".exe"
+                elif system in ("darwin", "mac", "macos"):
+                    suffix = ".dmg"
+                elif "android" in system or url.endswith(".apk"):
+                    suffix = ".apk"
+                else:
+                    suffix = ".bin"
                 fd, tmp_path = tempfile.mkstemp(suffix=suffix, prefix="Radiography_")
                 try:
                     with os.fdopen(fd, "wb") as f:
@@ -100,10 +146,12 @@ class UpdateChecker:
                             if progress_callback and total > 0:
                                 progress_callback(downloaded / total)
                 except Exception:
-                    os.unlink(tmp_path)
+                    if os.path.exists(tmp_path):
+                        os.unlink(tmp_path)
                     raise
                 if self._cancel:
-                    os.unlink(tmp_path)
+                    if os.path.exists(tmp_path):
+                        os.unlink(tmp_path)
                     return None
                 return tmp_path
         except Exception as e:
@@ -112,11 +160,14 @@ class UpdateChecker:
     def launch_installer(self, filepath):
         system = platform.system().lower()
         try:
-            if system == "windows":
+            if system in ("windows", "win32"):
                 os.startfile(filepath)
-            elif system == "darwin":
+            elif system in ("darwin", "mac", "macos"):
                 import subprocess
                 subprocess.Popen(["open", filepath])
+            elif "android" in system:
+                import webbrowser
+                webbrowser.open(filepath)
         except Exception as e:
             raise RuntimeError(f"Failed to launch installer: {e}")
 

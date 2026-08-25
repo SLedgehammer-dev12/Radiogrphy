@@ -45,6 +45,28 @@ class TestUpdater(unittest.TestCase):
         self.assertEqual(checker._parse_version("v1.3.4"), (1, 3, 4))
         self.assertEqual(checker._parse_version("1.3.4"), (1, 3, 4))
 
+    def test_get_download_url_platforms(self):
+        checker = self.UpdateChecker()
+        release_data = {
+            "assets": [
+                {"name": "Radiography-1.4.0-Windows-x64.exe", "browser_download_url": "https://github.com/exe"},
+                {"name": "Radiography-1.4.0-macOS.dmg", "browser_download_url": "https://github.com/dmg"},
+                {"name": "Radiography-1.4.0-Android-arm64-v8a.apk", "browser_download_url": "https://github.com/apk"},
+            ]
+        }
+        import platform
+        orig_sys = platform.system
+        try:
+            platform.system = lambda: "Windows"
+            self.assertEqual(checker.get_download_url(release_data), "https://github.com/exe")
+
+            platform.system = lambda: "Darwin"
+            self.assertEqual(checker.get_download_url(release_data), "https://github.com/dmg")
+
+            platform.system = lambda: "Linux"
+            self.assertEqual(checker.get_download_url(release_data), "https://github.com/apk")
+        finally:
+            platform.system = orig_sys
 
 if __name__ == "__main__":
     unittest.main()

@@ -36,7 +36,10 @@ class StepResults(MDScreen):
 
         self.ids.w_nom_val.text = f"{results.get('w_nom', 0):.2f} mm"
         self.ids.w_eff_val.text = f"{results.get('w_eff', 0):.2f} mm"
-        self.ids.u_max_val.text = f"{results.get('u_max', 0):.3f} mm"
+        if self.state.source == "x_ray":
+            self.ids.u_max_val.text = f"{results.get('u_max', 0):.1f} kV"
+        else:
+            self.ids.u_max_val.text = "N/A"
         self.ids.sfd_min_val.text = f"{results.get('sfd_min', 0):.0f} mm"
         self.ids.iqi_val.text = str(results.get("single_wire_iqi", {}).get("label", "-"))
         self.ids.time_val.text = f"{results.get('calc_time', 0):.1f} sn"

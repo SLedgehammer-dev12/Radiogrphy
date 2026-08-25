@@ -12,13 +12,19 @@ block_cipher = None
 # Dynamic version from single source of truth
 from src.core.version import __version__ as APP_VERSION
 
+try:
+    from PyInstaller.utils.hooks import collect_data_files
+    certifi_datas = collect_data_files('certifi')
+except Exception:
+    certifi_datas = []
+
 datas = [
     ("exposure_chart_dataset.json", "."),
     ("exposure_chart_dataset.csv", "."),
     ("X-Ray Exposure Chart steel.png", "."),
     ("ISO 17636-2 2022(E).pdf", "."),
     ("pdfcoffee.com_iso-17636-1-2022-pdf-free.pdf", "."),
-]
+] + certifi_datas
 
 hiddenimports = [
     "PyQt6.QtCore",

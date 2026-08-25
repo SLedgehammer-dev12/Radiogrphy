@@ -1,5 +1,22 @@
 # Changelog
 
+## [1.4.1] - 2026-08-25
+
+### Added
+- Dynamic Output Results Visibility:
+  - Isotope sources hide Tube Voltage ($U_{\text{max}}$) output row cleanly (no irrelevant "N/A" clutter).
+  - Analog Film hides Duplex IQI and DDA Flat-Panel exposure rows; updates target label to Optical Density ($D$) and detector quality to Required Film Class.
+  - Digital Mode shows Duplex IQI and Flat-Panel exposure count rows; updates target label to $\text{SNR}_N$ and detector quality to Required Detector Class / $\text{SR}_b$.
+- Analog Film Applied Exposure Count Input & Procedure Compliance Check:
+  - Applied Exposure Count is now accessible and active for Analog Film inspections.
+  - `procedure_check.py` evaluates analog exposure counts against ISO standard minimums (DWSI/DWDI/SWSI) with localized pass/fail messages (`exp_pass_analog` / `exp_fail_analog`).
+- Multi-Platform Update Robustness & SSL Fallback:
+  - Windows PyInstaller builds now package `certifi` CA certificates (`cacert.pem`) in datas.
+  - `updater.py` incorporates SSL verification fallback to guarantee update checks succeed across all Windows systems and restrictive network environments.
+  - Multi-platform asset downloader accurately resolves `.exe` (Windows), `.dmg` (macOS), and `.apk` (Android) releases.
+- Android APK buildozer / p4a recipe modernized:
+  - ReportLab recipe replaced with modern Pure Python (`PythonRecipe`) using PyPI sdist, eliminating legacy C-extension compilation and broken FTP dependencies.
+
 ## [1.4.0] - 2026-08-25
 
 ### Added

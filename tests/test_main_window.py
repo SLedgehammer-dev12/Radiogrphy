@@ -201,3 +201,45 @@ class TestMainWindowInit(unittest.TestCase):
         vals_gbq = self.win.get_form_values()
         # output_val converted back to Ci for internal calculation
         self.assertAlmostEqual(vals_gbq[5], 40.0, places=2)
+
+    def test_dynamic_output_visibility_analog_vs_digital(self):
+        # Select Analog
+        self.win.rad_analog.setChecked(True)
+        self.assertTrue(self.win.out_rows["duplex_iqi"].isHidden())
+        self.assertTrue(self.win.out_rows["exposures_panel"].isHidden())
+        self.assertFalse(self.win.out_rows["exposures_applied"].isHidden())
+        self.assertFalse(self.win.out_rows["exposures_check"].isHidden())
+
+        # Select Digital
+        self.win.rad_digital.setChecked(True)
+        self.assertFalse(self.win.out_rows["duplex_iqi"].isHidden())
+        self.assertFalse(self.win.out_rows["exposures_panel"].isHidden())
+        self.assertFalse(self.win.out_rows["exposures_applied"].isHidden())
+        self.assertFalse(self.win.out_rows["exposures_check"].isHidden())
+
+    def test_dynamic_output_visibility_xray_vs_isotope(self):
+        # Select X-Ray
+        self.win.cmb_source.setCurrentIndex(0)
+        self.assertFalse(self.win.out_rows["u_max"].isHidden())
+
+        # Select Isotope
+        self.win.cmb_source.setCurrentIndex(1)
+        self.assertTrue(self.win.out_rows["u_max"].isHidden())
+
+    def test_analog_applied_exposures_procedure_check(self):
+        # Set up analog DWSI
+        self.win.rad_analog.setChecked(True)
+        self.win.cmb_source.setCurrentIndex(0) # X-Ray
+        self.win.cmb_geometry.setCurrentIndex(0) # DWSI
+
+        # Set applied exposures to 1 (which is less than required for DWSI)
+        self.win.txt_app_exposures.setText("1")
+        self.win.check_procedure_compliance()
+        self.assertIn("DEĞİL", self.win.lbl_compliance_result.text())
+
+        # Set applied exposures to 6 (which is sufficient)
+        self.win.txt_app_exposures.setText("6")
+        self.win.check_procedure_compliance()
+        # Exposure check should pass
+        res_text = self.win.lbl_compliance_details.text()
+        self.assertIn("Poz Sayısı", res_text)

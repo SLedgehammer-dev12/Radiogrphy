@@ -350,7 +350,7 @@ class TestProcedureComplianceChecker(unittest.TestCase):
         exp_checks = [c for c in res["checks"] if c["name"] == "exposures"]
         self.assertEqual(len(exp_checks), 0)
 
-    def test_exposure_count_skipped_for_analog(self):
+    def test_exposure_count_checked_for_analog(self):
         inputs = {
             "tech": "analog",
             "source": "x_ray",
@@ -363,9 +363,10 @@ class TestProcedureComplianceChecker(unittest.TestCase):
             "u_max": 150.0,
             "sfd_min": 500.0,
             "required_wire_no": 12,
-            "required_exposures": 9,
+            "required_exposures": 4,
             "required_density": 2.3
         }
+        # Case 1: Insufficient exposures (3 < 4)
         applied = {
             "applied_kv": 140.0,
             "applied_sfd": 550.0,
@@ -376,9 +377,19 @@ class TestProcedureComplianceChecker(unittest.TestCase):
             "applied_overlap": 12.0,
             "applied_exposures": 3
         }
-        res = self.checker.check_compliance(inputs, calculated, applied, {}, "en")
+        res = self.checker.check_compliance(inputs, calculated, applied, {}, "tr")
+        self.assertFalse(res["is_compliant"])
         exp_checks = [c for c in res["checks"] if c["name"] == "exposures"]
-        self.assertEqual(len(exp_checks), 0)
+        self.assertEqual(len(exp_checks), 1)
+        self.assertFalse(exp_checks[0]["status"])
+
+        # Case 2: Sufficient exposures (4 >= 4)
+        applied["applied_exposures"] = 4
+        res2 = self.checker.check_compliance(inputs, calculated, applied, {}, "tr")
+        self.assertTrue(res2["is_compliant"])
+        exp_checks2 = [c for c in res2["checks"] if c["name"] == "exposures"]
+        self.assertEqual(len(exp_checks2), 1)
+        self.assertTrue(exp_checks2[0]["status"])
 
 if __name__ == "__main__":
     unittest.main()
