@@ -146,3 +146,58 @@ class TestMainWindowInit(unittest.TestCase):
         self.assertGreater(sum(bg[:3]), 2.0, f"Light theme should yield light background, got {bg}")
         self.win.toggle_theme()
         self.assertTrue(self.win.is_dark_theme)
+
+    def test_dynamic_visibility_analog_vs_digital(self):
+        # Select Analog
+        self.win.rad_analog.setChecked(True)
+        self.assertFalse(self.win.lbl_film_class_used.isHidden())
+        self.assertFalse(self.win.cmb_film_class_used.isHidden())
+        self.assertTrue(self.win.lbl_detector_type.isHidden())
+        self.assertTrue(self.win.cmb_detector_type.isHidden())
+        self.assertTrue(self.win.lbl_app_srb.isHidden())
+        self.assertTrue(self.win.lbl_app_duplex.isHidden())
+        self.assertTrue(self.win.lbl_dd.isHidden())
+
+        # Select Digital
+        self.win.rad_digital.setChecked(True)
+        self.assertTrue(self.win.lbl_film_class_used.isHidden())
+        self.assertTrue(self.win.cmb_film_class_used.isHidden())
+        self.assertFalse(self.win.lbl_detector_type.isHidden())
+        self.assertFalse(self.win.cmb_detector_type.isHidden())
+        self.assertFalse(self.win.lbl_app_srb.isHidden())
+        self.assertFalse(self.win.lbl_app_duplex.isHidden())
+        self.assertFalse(self.win.lbl_dd.isHidden())
+
+    def test_dynamic_visibility_xray_vs_isotope(self):
+        # Select X-Ray (index 0)
+        self.win.cmb_source.setCurrentIndex(0)
+        self.assertFalse(self.win.lbl_output.isHidden())
+        self.assertFalse(self.win.txt_output.isHidden())
+        self.assertFalse(self.win.lbl_app_kv.isHidden())
+        self.assertFalse(self.win.txt_app_kv.isHidden())
+        self.assertTrue(self.win.lbl_app_activity.isHidden())
+        self.assertTrue(self.win.act_widget.isHidden())
+
+        # Select Isotope Ir-192 (index 1)
+        self.win.cmb_source.setCurrentIndex(1)
+        self.assertTrue(self.win.lbl_output.isHidden())
+        self.assertTrue(self.win.txt_output.isHidden())
+        self.assertTrue(self.win.lbl_app_kv.isHidden())
+        self.assertTrue(self.win.txt_app_kv.isHidden())
+        self.assertFalse(self.win.lbl_app_activity.isHidden())
+        self.assertFalse(self.win.act_widget.isHidden())
+
+    def test_activity_unit_conversion(self):
+        self.win.cmb_source.setCurrentIndex(1) # Isotope
+        self.win.txt_app_activity.setText("40.0")
+        self.win.cmb_activity_unit.setCurrentText("Ci")
+        vals = self.win.get_form_values()
+        # output_val should be 40.0 in Ci
+        self.assertAlmostEqual(vals[5], 40.0, places=2)
+
+        # Switch to GBq
+        self.win.cmb_activity_unit.setCurrentIndex(1) # GBq
+        self.assertAlmostEqual(float(self.win.txt_app_activity.text()), 1480.0, delta=1.0)
+        vals_gbq = self.win.get_form_values()
+        # output_val converted back to Ci for internal calculation
+        self.assertAlmostEqual(vals_gbq[5], 40.0, places=2)

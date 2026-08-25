@@ -353,18 +353,28 @@ class MainWindow(QMainWindow,
         self.txt_app_kv.textChanged.connect(self.update_calculations)
         grp_exposure_layout.addRow(self.lbl_app_kv, self.txt_app_kv)
 
-        # Applied Activity (Ci) - visible for Isotopes
+        # Applied Activity (Ci / GBq) - visible for Isotopes
         self.lbl_app_activity = QLabel(self.trans.get("applied_activity"))
+        self.act_widget = QWidget()
+        act_layout = QHBoxLayout(self.act_widget)
+        act_layout.setContentsMargins(0, 0, 0, 0)
+        act_layout.setSpacing(4)
         self.txt_app_activity = QLineEdit("40.0")
-        self.txt_app_activity.setValidator(QDoubleValidator(0.01, 1000.0, 2))
+        self.txt_app_activity.setValidator(QDoubleValidator(0.01, 100000.0, 2))
         self.txt_app_activity.textChanged.connect(self.update_calculations)
-        grp_exposure_layout.addRow(self.lbl_app_activity, self.txt_app_activity)
+        self.cmb_activity_unit = QComboBox()
+        self.cmb_activity_unit.addItems(["Ci", "GBq"])
+        self.cmb_activity_unit.currentIndexChanged.connect(self.on_activity_unit_changed)
+        act_layout.addWidget(self.txt_app_activity)
+        act_layout.addWidget(self.cmb_activity_unit)
+        grp_exposure_layout.addRow(self.lbl_app_activity, self.act_widget)
 
         # Base factor E
+        self.lbl_base_e = QLabel(self.trans.get("base_factor"))
         self.txt_base_e = QLineEdit("3.0")
         self.txt_base_e.setValidator(QDoubleValidator(0.0001, 100.0, 4))
         self.txt_base_e.textChanged.connect(self.update_calculations)
-        grp_exposure_layout.addRow(self.trans.get("base_factor"), self.txt_base_e)
+        grp_exposure_layout.addRow(self.lbl_base_e, self.txt_base_e)
 
         # Chart Source
         self.cmb_chart_source = QComboBox()
@@ -655,10 +665,32 @@ class MainWindow(QMainWindow,
         # Auto-check for updates on startup (silent)
         QTimer.singleShot(2000, lambda: self.check_for_updates(silent=True))
 
+    def on_activity_unit_changed(self):
+        unit = self.cmb_activity_unit.currentText()
+        try:
+            val = float(self.txt_app_activity.text().replace(",", "."))
+            if unit == "GBq":
+                # Changed from Ci to GBq (1 Ci = 37 GBq)
+                self.txt_app_activity.blockSignals(True)
+                self.txt_app_activity.setText(f"{val * 37.0:.1f}")
+                self.txt_app_activity.blockSignals(False)
+            else:
+                # Changed from GBq to Ci
+                self.txt_app_activity.blockSignals(True)
+                self.txt_app_activity.setText(f"{val / 37.0:.1f}")
+                self.txt_app_activity.blockSignals(False)
+        except ValueError:
+            pass
+        self.update_calculations()
+
     def on_detector_type_changed(self):
-        is_curved = self.rad_detector_curved.isChecked()
-        self.txt_bed.setVisible(is_curved)
-        self.txt_bgap.setVisible(is_curved)
+        is_digital = self.rad_digital.isChecked()
+        is_curved = is_digital and hasattr(self, 'rad_detector_curved') and self.rad_detector_curved.isChecked()
+        if hasattr(self, 'lbl_bed'):
+            self.lbl_bed.setVisible(is_curved)
+            self.txt_bed.setVisible(is_curved)
+            self.lbl_bgap.setVisible(is_curved)
+            self.txt_bgap.setVisible(is_curved)
         self.update_calculations()
 
     def on_tech_changed(self):
@@ -697,6 +729,20 @@ class MainWindow(QMainWindow,
         self.txt_f_source.setVisible(is_digital)
         self.lbl_b_object.setVisible(is_digital)
         self.txt_b_object.setVisible(is_digital)
+
+        # Input panel digital elements
+        if hasattr(self, 'lbl_dd'):
+            self.lbl_dd.setVisible(is_digital)
+            self.txt_dd.setVisible(is_digital)
+        if hasattr(self, 'lbl_det_shape'):
+            self.lbl_det_shape.setVisible(is_digital)
+            self.det_type_widget.setVisible(is_digital)
+        is_curved = is_digital and hasattr(self, 'rad_detector_curved') and self.rad_detector_curved.isChecked()
+        if hasattr(self, 'lbl_bed'):
+            self.lbl_bed.setVisible(is_curved)
+            self.txt_bed.setVisible(is_curved)
+            self.lbl_bgap.setVisible(is_curved)
+            self.txt_bgap.setVisible(is_curved)
         
         # update target label name
         target_name = "target_snr" if is_digital else "optical_density"
@@ -729,6 +775,10 @@ class MainWindow(QMainWindow,
             if not self.txt_output.text():
                 self.txt_output.setText("5.0")
             self.txt_base_e.setText("3.0")
+            if hasattr(self, 'lbl_base_e'):
+                self.lbl_base_e.setText(self.trans.get("base_factor") + " (mA·min/m²):")
+            if hasattr(self, 'lbl_focal_size'):
+                self.lbl_focal_size.setText(self.trans.get("focal_size"))
             
             # Show Tube Amperage & Voltage, Hide Activity
             self.lbl_output.setVisible(True)
@@ -736,7 +786,10 @@ class MainWindow(QMainWindow,
             self.lbl_app_kv.setVisible(True)
             self.txt_app_kv.setVisible(True)
             self.lbl_app_activity.setVisible(False)
-            self.txt_app_activity.setVisible(False)
+            if hasattr(self, 'act_widget'):
+                self.act_widget.setVisible(False)
+            else:
+                self.txt_app_activity.setVisible(False)
         else: # Isotopes
             # Hide Amperage & Voltage, Show Activity
             self.lbl_output.setVisible(False)
@@ -744,10 +797,19 @@ class MainWindow(QMainWindow,
             self.lbl_app_kv.setVisible(False)
             self.txt_app_kv.setVisible(False)
             self.lbl_app_activity.setVisible(True)
-            self.txt_app_activity.setVisible(True)
+            if hasattr(self, 'act_widget'):
+                self.act_widget.setVisible(True)
+            else:
+                self.txt_app_activity.setVisible(True)
+
+            if hasattr(self, 'lbl_base_e'):
+                self.lbl_base_e.setText(self.trans.get("base_factor") + " (Ci·min/m²):")
+            if hasattr(self, 'lbl_focal_size'):
+                self.lbl_focal_size.setText(self.trans.get("source_size_d"))
 
             if not self.txt_app_activity.text():
-                self.txt_app_activity.setText("40.0")
+                unit = self.cmb_activity_unit.currentText() if hasattr(self, 'cmb_activity_unit') else "Ci"
+                self.txt_app_activity.setText("1480.0" if unit == "GBq" else "40.0")
 
             # Set base factor default per isotope
             if source_idx == 1:   # Ir-192
@@ -1173,7 +1235,12 @@ class MainWindow(QMainWindow,
                 output_val = 5.0
         else:  # Isotopes
             try:
-                output_val = float(self.txt_app_activity.text().replace(",", "."))
+                raw_act = float(self.txt_app_activity.text().replace(",", "."))
+                unit = self.cmb_activity_unit.currentText() if hasattr(self, 'cmb_activity_unit') else "Ci"
+                if unit == "GBq":
+                    output_val = raw_act / 37.0
+                else:
+                    output_val = raw_act
             except ValueError:
                 output_val = 40.0
 
@@ -1823,7 +1890,9 @@ class MainWindow(QMainWindow,
             applied_kv = 0.0
             
         try:
-            applied_activity = float(self.txt_app_activity.text().replace(",", "."))
+            raw_act = float(self.txt_app_activity.text().replace(",", "."))
+            unit = self.cmb_activity_unit.currentText() if hasattr(self, 'cmb_activity_unit') else "Ci"
+            applied_activity = raw_act / 37.0 if unit == "GBq" else raw_act
         except ValueError:
             applied_activity = 0.0
 

@@ -28,12 +28,24 @@ class StepExposure(MDScreen):
 
     def _update_ui(self):
         is_digital = self.state.tech == "digital"
+        is_xray = self.state.source == "x_ray"
+
+        # Film vs Detector
         self.ids.film_area.opacity = 0 if is_digital else 1
         self.ids.film_area.disabled = is_digital
         self.ids.detector_area.opacity = 1 if is_digital else 0
         self.ids.detector_area.disabled = not is_digital
         self.ids.film_class_btn.text = self.state.film_class
         self.ids.detector_btn.text = self.state.get_text(DETECTOR_TYPES[0][1])
+
+        # X-Ray vs Isotope
+        self.ids.xray_area.opacity = 1 if is_xray else 0
+        self.ids.xray_area.disabled = not is_xray
+        self.ids.xray_area.height = dp(128) if is_xray else 0
+
+        self.ids.isotope_area.opacity = 0 if is_xray else 1
+        self.ids.isotope_area.disabled = is_xray
+        self.ids.isotope_area.height = 0 if is_xray else dp(60)
 
     def on_kv(self, text):
         try:
@@ -46,6 +58,16 @@ class StepExposure(MDScreen):
             self.state.set("ma", float(text))
         except ValueError:
             pass
+
+    def on_activity(self, text):
+        try:
+            self.state.set("app_activity", float(text))
+        except ValueError:
+            pass
+
+    def on_slider_activity(self, value):
+        self.state.set("app_activity", round(value, 1))
+        self.ids.activity_input.text = str(round(value, 1))
 
     def on_time(self, text):
         try:

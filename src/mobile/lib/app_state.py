@@ -83,6 +83,7 @@ class AppState:
     def get_form_values(self):
         od = self.pipe_od
         wall = self.pipe_wall
+        output_val = self.ma if self.source == "x_ray" else self.app_activity
         return {
             "od": od,
             "t": wall,
@@ -98,7 +99,7 @@ class AppState:
             "bed": self.bed,
             "bgap": self.bgap,
             "kv": self.kv,
-            "output_val": self.ma,
+            "output_val": output_val,
             "app_sfd": self.app_sfd,
             "app_kv": self.app_kv,
             "app_activity": self.app_activity,
@@ -158,11 +159,19 @@ class AppState:
         except Exception:
             sfd_min = 0.0
         try:
-            calc_time = self.calc.calculate_exposure_time(
-                vals["app_sfd"], w_eff, vals["source"],
-                vals["output_val"], 3.0, vals["film_class"],
-                vals["material"], vals["kv"], None, vals["tech"],
-                vals["testing_class"], vals["app_kv"], vals["app_activity"],
+            base_e = 3.0 if vals["source"] == "x_ray" else (30.0 if vals["source"] == "isotope_ir192" else (40.0 if vals["source"] == "isotope_se75" else 20.0))
+            _min, _sec, calc_time = self.calc.calculate_exposure_time(
+                sfd=vals["app_sfd"],
+                w_eff=w_eff,
+                source=vals["source"],
+                output_val=vals["output_val"],
+                base_factor=base_e,
+                tech=vals["tech"],
+                testing_class=vals["testing_class"],
+                film_class=vals["film_class_used"],
+                detector_type=vals["detector_type"],
+                kv=vals["kv"] if vals["source"] == "x_ray" else None,
+                material=vals["material"],
             )
         except Exception:
             calc_time = 0.0

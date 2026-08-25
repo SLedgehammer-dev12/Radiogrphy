@@ -99,17 +99,19 @@ class InputPanelMixin:
         self.cmb_source.currentIndexChanged.connect(self.on_source_changed)
         grp_inputs_layout.addRow(self.trans.get("rad_source"), self.cmb_source)
 
-        # Focal size
+        # Focal / Source size
+        self.lbl_focal_size = QLabel(self.trans.get("focal_size"))
         self.txt_d = QLineEdit("2.0")
         self.txt_d.setValidator(QDoubleValidator(0.01, 20.0, 2))
         self.txt_d.textChanged.connect(self.update_calculations)
-        grp_inputs_layout.addRow(self.trans.get("focal_size"), self.txt_d)
+        grp_inputs_layout.addRow(self.lbl_focal_size, self.txt_d)
 
-        # Detector size
+        # Detector size (digital only)
+        self.lbl_dd = QLabel(self.trans.get("detector_size"))
         self.txt_dd = QLineEdit("200.0")
         self.txt_dd.setValidator(QDoubleValidator(1.0, 1000.0, 1))
         self.txt_dd.textChanged.connect(self.update_calculations)
-        grp_inputs_layout.addRow(self.trans.get("detector_size"), self.txt_dd)
+        grp_inputs_layout.addRow(self.lbl_dd, self.txt_dd)
 
         # Testing class
         self.cmb_class = QComboBox()
@@ -136,29 +138,32 @@ class InputPanelMixin:
         self.cmb_std_figure.currentIndexChanged.connect(self.on_std_figure_changed)
         grp_inputs_layout.addRow(self.trans.get("standard_fig"), self.cmb_std_figure)
 
-        # Detector shape (flat/curved)
+        # Detector shape (flat/curved) - digital only
+        self.lbl_det_shape = QLabel(self.trans.get("detector_type"))
         self.rad_detector_flat = QRadioButton(self.trans.get("detector_flat"))
         self.rad_detector_curved = QRadioButton(self.trans.get("detector_curved"))
         self.rad_detector_flat.setChecked(True)
-        det_type_widget = QWidget()
-        det_type_layout = QHBoxLayout(det_type_widget)
+        self.det_type_widget = QWidget()
+        det_type_layout = QHBoxLayout(self.det_type_widget)
         det_type_layout.setContentsMargins(0, 0, 0, 0)
         det_type_layout.addWidget(self.rad_detector_flat)
         det_type_layout.addWidget(self.rad_detector_curved)
         self.rad_detector_flat.toggled.connect(self.on_detector_type_changed)
         self.rad_detector_curved.toggled.connect(self.on_detector_type_changed)
-        grp_inputs_layout.addRow(self.trans.get("detector_type"), det_type_widget)
+        grp_inputs_layout.addRow(self.lbl_det_shape, self.det_type_widget)
 
-        # Bed & gap
+        # Bed & gap (digital curved only)
+        self.lbl_bed = QLabel(self.trans.get("bed"))
         self.txt_bed = QLineEdit("0.0")
         self.txt_bed.setValidator(QDoubleValidator(0.0, 500.0, 1))
         self.txt_bed.textChanged.connect(self.update_calculations)
-        self.lbl_bed = grp_inputs_layout.addRow(self.trans.get("bed"), self.txt_bed)
+        grp_inputs_layout.addRow(self.lbl_bed, self.txt_bed)
 
+        self.lbl_bgap = QLabel(self.trans.get("bgap"))
         self.txt_bgap = QLineEdit("5.0")
         self.txt_bgap.setValidator(QDoubleValidator(0.0, 500.0, 1))
         self.txt_bgap.textChanged.connect(self.update_calculations)
-        self.lbl_bgap = grp_inputs_layout.addRow(self.trans.get("bgap"), self.txt_bgap)
+        grp_inputs_layout.addRow(self.lbl_bgap, self.txt_bgap)
 
         # User-provided geometry overrides (digital, blank = auto)
         self.lbl_f_source = QLabel(self.trans.get("source_dist"))

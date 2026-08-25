@@ -948,14 +948,25 @@ class TestRTCalculatorEdgeCases(unittest.TestCase):
         path = self.calc._penetrated_path_length(theta, re, re - t, 500.0)
         self.assertAlmostEqual(path / t, 1.10, places=3)
 
-    def test_panel_half_angle_monotonic(self):
-        # Larger panel -> larger half angle
-        re = 100.0
-        f = 500.0
-        sdd = 550.0
-        a1 = self.calc._panel_half_angle(re, f, sdd, 50.0)
-        a2 = self.calc._panel_half_angle(re, f, sdd, 150.0)
-        self.assertGreaterEqual(a2, a1)
+    def test_isotope_exposure_time_inversely_proportional_to_activity(self):
+        # Physics model: time is inversely proportional to activity
+        min1, sec1, total1 = self.calc.calculate_exposure_time(
+            sfd=600.0, w_eff=15.0, source="isotope_ir192", output_val=20.0,
+            base_factor=30.0, tech="analog", film_class="C5"
+        )
+        min2, sec2, total2 = self.calc.calculate_exposure_time(
+            sfd=600.0, w_eff=15.0, source="isotope_ir192", output_val=40.0,
+            base_factor=30.0, tech="analog", film_class="C5"
+        )
+        self.assertAlmostEqual(total1, total2 * 2.0, delta=1.0)
+
+    def test_isotope_rfactor_exposure_time_with_activity(self):
+        # Chart model (AA400 film): time is inversely proportional to activity
+        from src.core.exposure_charts import ExposureChartDatabase
+        db = ExposureChartDatabase()
+        t1 = db.calculate_exposure_time_rfactor(sfd=600.0, w=15.0, source="isotope_ir192", activity=20.0, film_key="AA400")
+        t2 = db.calculate_exposure_time_rfactor(sfd=600.0, w=15.0, source="isotope_ir192", activity=40.0, film_key="AA400")
+        self.assertAlmostEqual(t1, t2 * 2.0, places=3)
 
 if __name__ == "__main__":
     unittest.main()

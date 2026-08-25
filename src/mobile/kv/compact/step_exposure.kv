@@ -22,45 +22,78 @@
                 height: self.minimum_height
                 spacing: dp(8)
 
-                # kV
+                # X-Ray specific inputs (kV & mA)
                 BoxLayout:
+                    id: xray_area
+                    orientation: "vertical"
                     size_hint_y: None
-                    height: dp(60)
+                    height: dp(128)
                     spacing: dp(8)
-                    MDTextField:
-                        id: kv_input
-                        hint_text: "kV"
-                        text: str(app.state.kv)
-                        input_filter: "float"
-                        size_hint_x: 0.3
-                        on_text: root.on_kv(self.text)
-                    MDSlider:
-                        id: kv_slider
-                        size_hint_x: 0.7
-                        min: 1.0
-                        max: 1000.0
-                        value: app.state.kv
-                        on_value: root.on_slider_kv(args[1])
+                    # kV
+                    BoxLayout:
+                        size_hint_y: None
+                        height: dp(60)
+                        spacing: dp(8)
+                        MDTextField:
+                            id: kv_input
+                            hint_text: "kV"
+                            text: str(app.state.kv)
+                            input_filter: "float"
+                            size_hint_x: 0.3
+                            on_text: root.on_kv(self.text)
+                        MDSlider:
+                            id: kv_slider
+                            size_hint_x: 0.7
+                            min: 1.0
+                            max: 1000.0
+                            value: app.state.kv
+                            on_value: root.on_slider_kv(args[1])
 
-                # mA
+                    # mA
+                    BoxLayout:
+                        size_hint_y: None
+                        height: dp(60)
+                        spacing: dp(8)
+                        MDTextField:
+                            id: ma_input
+                            hint_text: "mA"
+                            text: str(app.state.ma)
+                            input_filter: "float"
+                            size_hint_x: 0.3
+                            on_text: root.on_ma(self.text)
+                        MDSlider:
+                            id: ma_slider
+                            size_hint_x: 0.7
+                            min: 0.1
+                            max: 50.0
+                            value: app.state.ma
+                            on_value: root.on_slider_ma(args[1])
+
+                # Isotope specific input (Activity in Ci)
                 BoxLayout:
+                    id: isotope_area
+                    orientation: "vertical"
                     size_hint_y: None
                     height: dp(60)
                     spacing: dp(8)
-                    MDTextField:
-                        id: ma_input
-                        hint_text: "mA"
-                        text: str(app.state.ma)
-                        input_filter: "float"
-                        size_hint_x: 0.3
-                        on_text: root.on_ma(self.text)
-                    MDSlider:
-                        id: ma_slider
-                        size_hint_x: 0.7
-                        min: 0.1
-                        max: 50.0
-                        value: app.state.ma
-                        on_value: root.on_slider_ma(args[1])
+                    BoxLayout:
+                        size_hint_y: None
+                        height: dp(60)
+                        spacing: dp(8)
+                        MDTextField:
+                            id: activity_input
+                            hint_text: "Aktivite (Ci)"
+                            text: str(app.state.app_activity)
+                            input_filter: "float"
+                            size_hint_x: 0.3
+                            on_text: root.on_activity(self.text)
+                        MDSlider:
+                            id: activity_slider
+                            size_hint_x: 0.7
+                            min: 0.1
+                            max: 200.0
+                            value: app.state.app_activity
+                            on_value: root.on_slider_activity(args[1])
 
                 # Time
                 BoxLayout:

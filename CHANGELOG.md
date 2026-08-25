@@ -1,5 +1,21 @@
 # Changelog
 
+## [1.4.0] - 2026-08-25
+
+### Added
+- Isotope source activity (Ci / GBq) dynamic input and conversion:
+  - Added unit selector (Curie / Gigabecquerel) on desktop and mobile with automatic $1\text{ Ci} = 37\text{ GBq}$ conversion.
+  - Added Activity (Ci) input and slider to Mobile Step 3 (Exposure).
+  - Exposure time calculations correctly scale inversely proportional to isotope activity ($t \propto 1/A$) in both Physics and R-Factor models.
+- Dynamic UI simplification based on technique and source:
+  - **X-Ray vs Isotope:** X-Ray shows Tube Voltage (kV) and Amperage (mA) while hiding isotope activity; Isotope shows Source Activity while hiding kV/mA and dynamically adjusting focal size and base factor labels.
+  - **Analog vs Digital:** Analog Film hides digital detector, DDA panel, SRb resolution, duplex IQI and SNR inputs; Digital hides film class, film overlap and density inputs.
+- Unit tests for dynamic UI visibility, isotope activity inverse proportionality and activity unit conversion.
+
+### Fixed
+- Fixed mobile `app_state.py` where `output_val` was hardcoded to `ma` (5.0), causing incorrect isotope exposure times.
+- Fixed `calculate_exposure_time` parameter mapping in `app_state.py`.
+
 ## [1.3.5] - 2026-08-13
 
 ### Fixed
