@@ -192,7 +192,11 @@ jobs:
   create-release:
     name: Create GitHub Release
     needs: [check-version, build-windows, build-macos, build-android]
-    if: needs.build-windows.result == 'success' && needs.build-macos.result == 'success'
+    if: |
+      always() &&
+      !cancelled() &&
+      needs.build-windows.result == 'success' &&
+      needs.build-macos.result == 'success'
     runs-on: ubuntu-latest
     permissions:
       contents: write

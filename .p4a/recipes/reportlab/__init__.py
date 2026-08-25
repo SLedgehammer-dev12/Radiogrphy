@@ -10,8 +10,8 @@ from pythonforandroid.util import current_directory, ensure_dir, touch
 
 
 class ReportlabRecipe(CompiledComponentsPythonRecipe):
-    version = 'fe660f227cac'
-    url = 'https://hg.reportlab.com/hg-public/reportlab/archive/{version}.tar.gz'
+    version = '4.4.1'
+    url = 'https://files.pythonhosted.org/packages/7b/d8/c3366bf10a5a5fcc3467eefa9504f6aa24fcda5817b5b147eabd37a385e1/reportlab-{version}.tar.gz'
     depends = ['freetype']
     call_hostpython_via_targetpython = False
 
