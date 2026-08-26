@@ -102,10 +102,18 @@
                     padding: dp(12)
                     spacing: dp(8)
                     MDLabel:
-                        text: "API 1104 Kusur Değerlendirme"
+                        text: "Kusur Değerlendirme"
                         font_style: "H5"
                         size_hint_y: None
                         height: dp(24)
+
+                    MDRaisedButton:
+                        id: defect_std_btn
+                        text: "Standart: API 1104"
+                        size_hint_x: 1
+                        size_hint_y: None
+                        height: dp(48)
+                        on_release: root.open_defect_standard_menu()
 
                     MDRaisedButton:
                         id: defect_type_btn

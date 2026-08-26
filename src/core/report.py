@@ -253,10 +253,13 @@ class PDFReportGenerator:
         # Report / procedure header fields (only non-empty ones)
         report_info = inputs.get("report_info") or {}
         info_fields = [
-            ("report_no", "report_no"), ("project", "project"),
-            ("welder_id", "welder_id"), ("wps_pqr", "wps_pqr"),
+            ("report_no", "report_no"), ("report_rev", "report_rev"),
+            ("project", "project"), ("welder_id", "welder_id"),
+            ("joint_id", "joint_id"), ("wps_pqr", "wps_pqr"),
             ("procedure_no", "procedure_no"), ("device_serial", "device_serial"),
             ("calibration_date", "calibration_date"), ("personnel", "personnel"),
+            ("lvl2_name", "lvl2_name"), ("lvl2_cert", "lvl2_cert"),
+            ("lvl3_name", "lvl3_name"), ("lvl3_cert", "lvl3_cert"),
         ]
         filled_info = [(key, report_info.get(key, "")) for key, _ in info_fields if report_info.get(key)]
         if filled_info:
@@ -600,18 +603,23 @@ class PDFReportGenerator:
         story.append(ref_table)
         story.append(Spacer(1, 20))
 
-        # Signature Line
+        # Formal approval blocks — Level II (Inspector) / Level III (Approver)
+        lvl2_name = (report_info or {}).get("lvl2_name", "")
+        lvl2_cert = (report_info or {}).get("lvl2_cert", "")
+        lvl3_name = (report_info or {}).get("lvl3_name", "")
+        lvl3_cert = (report_info or {}).get("lvl3_cert", "")
         sig_data = [
             ["", ""],
             ["_________________________", "_________________________"],
-            ["Prepared By (Inspector)", "Approved By (Client / QA)"]
+            [Paragraph(lang_obj.get("lvl2_name"), label_style), Paragraph(lang_obj.get("lvl3_name"), label_style)],
+            [Paragraph(f"{lvl2_name} {('(' + lvl2_cert + ')') if lvl2_cert else ''}", value_style),
+             Paragraph(f"{lvl3_name} {('(' + lvl3_cert + ')') if lvl3_cert else ''}", value_style)],
         ]
         sig_table = Table(sig_data, colWidths=[250, 250])
         sig_table.setStyle(TableStyle([
             ('ALIGN', (0,0), (-1,-1), 'CENTER'),
-            ('FONTNAME', (0,2), (-1,2), PDFReportGenerator._resolve_font('Arial-Bold')),
             ('FONTSIZE', (0,2), (-1,2), 9),
-            ('TOPPADDING', (0,1), (-1,1), 40), # Space for signatures
+            ('TOPPADDING', (0,1), (-1,1), 40), # Space for signatures / kaşe
         ]))
         story.append(sig_table)
 

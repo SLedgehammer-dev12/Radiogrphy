@@ -64,6 +64,10 @@ class AppState:
         self.film_class_used = "C5"
         self.snr_location = "weld"
         self.iqi_type = "wire"
+        self.defect_standard = "api1104"
+        self.defect_level = "C"
+        self.b31_service = "normal"
+        self.viii_mode = "UW-51"
 
         self.results = {}
         self.compliance = {}
@@ -305,9 +309,28 @@ class AppState:
     def evaluate_defect(self, defect_type, length, width, accumulated):
         try:
             vals = self.get_form_values()
-            self.defect_eval = self.api1104.evaluate(
-                defect_type, vals["t"], length, width, accumulated, self.language
-            )
+            if self.defect_standard == "iso5817":
+                from core.iso5817 import ISO5817Evaluator
+                self.defect_eval = ISO5817Evaluator().evaluate(
+                    defect_type, vals["t"], length, width, accumulated,
+                    level=self.defect_level, lang=self.language
+                )
+            elif self.defect_standard == "b31_3":
+                from core.asme_b31_3 import ASMEB31_3Evaluator
+                self.defect_eval = ASMEB31_3Evaluator().evaluate(
+                    defect_type, vals["t"], length, width, accumulated,
+                    service=self.b31_service, lang=self.language
+                )
+            elif self.defect_standard == "viii":
+                from core.asme_viii import ASMEVIIIEvaluator
+                self.defect_eval = ASMEVIIIEvaluator().evaluate(
+                    defect_type, vals["t"], length, width, accumulated,
+                    mode=self.viii_mode, lang=self.language
+                )
+            else:
+                self.defect_eval = self.api1104.evaluate(
+                    defect_type, vals["t"], length, width, accumulated, self.language
+                )
         except Exception as e:
             self.defect_eval = {"status": False, "result": "error", "details": str(e)}
         return self.defect_eval

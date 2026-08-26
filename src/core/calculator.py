@@ -1845,48 +1845,57 @@ class RTCalculator:
     # Approximations: 2-2T hole-type sensitivity and 2 % wire sensitivity,
     # used when the ASME standard is selected.
     # -----------------------------------------------------------------------
-    def get_astm_iqi_hole(self, t):
+    def get_astm_iqi_hole(self, t, sensitivity="2-2T"):
         """
-        ASTM E1025 hole-type IQI requirement (2-2T essential hole).
-        Required IQI thickness T = t/2; the hole to identify has diameter 2T.
+        ASTM E1025 hole-type IQI requirement with selectable sensitivity
+        (ASME Sec V Art. 2, Table T-276):
+          - 2-2T : IQI thickness T = t/2, essential hole 2T (hole dia = t)
+          - 2-1T : T = t,              essential hole 2T (hole dia = 2t)
+          - 1-2T : T = t/2,            essential hole 1T (hole dia = t/2)
         Returns dict with designator, plate thickness (mm) and hole diameter.
         """
         t = max(float(t), 0.1)
-        iqi_t = t / 2.0            # plate thickness T for 2-2T
-        hole_dia = 2.0 * iqi_t     # = t
+        sensitivity = (sensitivity or "2-2T").upper()
+        if sensitivity == "2-1T":
+            iqi_t = t
+            hole_dia = 2.0 * iqi_t
+        elif sensitivity == "1-2T":
+            iqi_t = t / 2.0
+            hole_dia = 1.0 * iqi_t
+        else:  # 2-2T default
+            iqi_t = t / 2.0
+            hole_dia = 2.0 * iqi_t
         return {
-            "designator": "2-2T",
+            "designator": sensitivity,
             "iqi_t_mm": iqi_t,
             "hole_dia_mm": hole_dia,
         }
 
-    # ASTM E747 wire set ranges by penetrated thickness (inches) and wire
-    # diameters (mm) per E747 wire-number table (approx., 2 % sensitivity).
-    E747_WIRE_DIA_MM = {1: 3.20, 2: 2.50, 3: 2.00, 4: 1.60, 5: 1.25, 6: 1.00,
-                        7: 0.80, 8: 0.63, 9: 0.50, 10: 0.40, 11: 0.32, 12: 0.25,
-                        13: 0.20, 14: 0.16, 15: 0.125, 16: 0.10, 17: 0.08, 18: 0.063}
+    # ASTM E747 wire-type IQI: wire number -> nominal diameter (mm) and set.
+    # Diameters per ASTM E747 (approximate nominal); set = wire-number range.
+    E747_WIRE_DIA_MM = {
+        1: 3.20, 2: 2.54, 3: 2.03, 4: 1.60, 5: 1.27, 6: 1.02,     # Set A
+        7: 0.81, 8: 0.64, 9: 0.51, 10: 0.41, 11: 0.33, 12: 0.25,   # Set B
+        13: 0.20, 14: 0.16, 15: 0.13, 16: 0.10, 17: 0.08, 18: 0.064,  # Set C
+        19: 0.051, 20: 0.041, 21: 0.033,                           # Set D
+    }
+    E747_SETS = {"A": (1, 6), "B": (7, 12), "C": (13, 18), "D": (19, 21)}
 
     def get_astm_iqi_wire(self, t):
         """
         ASTM E747 wire-type IQI requirement (2 % sensitivity).
-        Required wire diameter ~ 2 % of penetrated thickness; E747 wire set
-        chosen by thickness range. Returns dict with set, wire number, diameter.
+        Required wire diameter ~ 2 % of penetrated thickness; the wire number
+        determines the set (A/B/C/D). Returns dict with set, wire number, diameter.
         """
         t = max(float(t), 0.1)
         req_dia = 0.02 * t
-        # Nearest wire number whose diameter >= required (fine <= coarse)
-        wire = min(
+        # Finest wire that still meets the 2% requirement: highest wire number
+        # (thinnest) whose diameter is >= required.
+        wire = max(
             (n for n, d in self.E747_WIRE_DIA_MM.items() if d >= req_dia),
-            default=18,
+            default=21,
         )
-        if t <= 6.35:        # 0.25 in -> Set A
-            wset = "A"
-        elif t <= 19.05:     # 0.75 in -> Set B
-            wset = "B"
-        elif t <= 50.8:      # 2.0 in -> Set C
-            wset = "C"
-        else:                # Set D
-            wset = "D"
+        wset = next((s for s, (lo, hi) in self.E747_SETS.items() if lo <= wire <= hi), "D")
         return {
             "set": wset,
             "wire_no": wire,
@@ -1911,6 +1920,24 @@ class RTCalculator:
         "isotope_yb169": 0.125,
         "isotope_tm170": 0.003,
     }
+    # Gamma constants [mSv*m^2/(h*Ci)] — alternative common convention
+    # (1 R/h ~ 0.0087 Sv/h; the rounded 1 R ~ 10 mSv approximation is used here
+    # for the mSv convention, matching field slide-rule practice).
+    GAMMA_MSV_M2_H_CI = {
+        "isotope_ir192": 4.8,
+        "isotope_se75": 2.03,
+        "isotope_co60": 13.0,
+        "isotope_yb169": 1.25,
+        "isotope_tm170": 0.03,
+    }
+    # Half-lives in days for the isotope decay engine.
+    ISOTOPE_HALF_LIVES = {
+        "isotope_ir192": 73.83,
+        "isotope_se75": 119.78,
+        "isotope_co60": 1925.5,   # 5.271 y
+        "isotope_yb169": 32.02,
+        "isotope_tm170": 128.6,
+    }
     # Approximate effective half-value layers [mm of lead] for collimator/shield.
     COLLIMATOR_HVL_MM_LEAD = {
         "isotope_ir192": 2.8,
@@ -1920,22 +1947,69 @@ class RTCalculator:
         "isotope_tm170": 0.08,
     }
 
+    def decay_days_since(self, calib_date, inspection_date=None):
+        """Whole days between the calibration date and the inspection date
+        (defaults to today). Accepts date/datetime or 'YYYY-MM-DD' strings."""
+        from datetime import date, datetime
+        def _to_date(d):
+            if isinstance(d, datetime):
+                return d.date()
+            if isinstance(d, date):
+                return d
+            if isinstance(d, str):
+                return datetime.strptime(d[:10], "%Y-%m-%d").date()
+            return None
+        c = _to_date(calib_date)
+        if c is None:
+            return 0.0
+        t = _to_date(inspection_date) if inspection_date is not None else date.today()
+        if t is None:
+            return 0.0
+        return (t - c).days
+
+    def calculate_decayed_activity(self, initial_ci, calib_date, inspection_date=None,
+                                   isotope="isotope_ir192"):
+        """
+        Current activity A(t) = A0 * 2^(-(t-t0)/T1/2) using the isotope half-life.
+        Returns 0.0 if inputs are invalid.
+        """
+        try:
+            a0 = float(initial_ci)
+        except (TypeError, ValueError):
+            return 0.0
+        if a0 <= 0.0:
+            return 0.0
+        half_life = self.ISOTOPE_HALF_LIVES.get(isotope)
+        if not half_life or half_life <= 0.0:
+            return a0
+        days = self.decay_days_since(calib_date, inspection_date)
+        if days <= 0.0:
+            return a0
+        return a0 * (2.0 ** (-days / half_life))
+
     def calculate_barrier_distance(self, source, activity_ci, limit_usvh=20.0,
-                                   hvl_layers=0.0, hvls_per_cm=None):
+                                   hvl_layers=0.0, hvls_per_cm=None, convention="r"):
         """
         Calculates the safe barrier distance R (m) such that the dose rate at R
         does not exceed `limit_usvh` µSv/h.
 
-        Dose-rate at R metres (no shield):  D[µSv/h] = (Gamma * A[Ci] / R^2) * 8697
-        where 1 R/h = 8697 µSv/h. With a collimator providing `hvl_layers`
-        half-value layers of attenuation, the dose rate is divided by 2^layers.
+        Dose-rate at R metres (no shield):
+          convention="r"  :  D[µSv/h] = (Gamma_R * A[Ci] / R^2) * 8697  (1 R/h = 8697 µSv/h)
+          convention="msv":  D[µSv/h] = (Gamma_mSv * A[Ci] / R^2) * 1000 (1 mSv = 1000 µSv)
+
+        With a collimator providing `hvl_layers` half-value layers of attenuation,
+        the dose rate is divided by 2^layers.
 
         Returns (distance_m, dose_rate_at_1m_usvh, shielding_reduction).
         """
-        gamma = self.GAMMA_RM2_H_CI.get(source, 0.48)
+        if convention == "msv":
+            gamma = self.GAMMA_MSV_M2_H_CI.get(source, 4.8)
+            base = gamma * float(activity_ci) * 1000.0  # µSv/h at 1 m, unshielded
+        else:
+            gamma = self.GAMMA_RM2_H_CI.get(source, 0.48)
+            base = gamma * float(activity_ci) * 8697.0  # µSv/h at 1 m, unshielded
         if activity_ci is None or activity_ci <= 0.0:
             return 0.0, 0.0, 1.0
-        base = gamma * float(activity_ci) * 8697.0  # µSv/h at 1 m, unshielded
         reduction = 2.0 ** hvl_layers
         shielded = base / reduction
         if shielded <= 0.0:

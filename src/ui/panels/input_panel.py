@@ -25,12 +25,8 @@ class InputPanelMixin:
     def _init_input_panel(self, grp_inputs_layout):
         # Material
         self.cmb_material = QComboBox()
-        self.cmb_material.addItems([
-            self.trans.get("steel"),
-            self.trans.get("aluminum"),
-            self.trans.get("titanium"),
-            self.trans.get("copper_nickel")
-        ])
+        for key in ("steel", "aluminum", "titanium", "copper_nickel"):
+            self.cmb_material.addItem(self.trans.get(key), key)
         self.cmb_material.currentIndexChanged.connect(self.update_calculations)
         grp_inputs_layout.addRow(self.trans.get("material_type"), self.cmb_material)
 
@@ -97,14 +93,9 @@ class InputPanelMixin:
 
         # Source
         self.cmb_source = QComboBox()
-        self.cmb_source.addItems([
-            self.trans.get("x_ray"),
-            self.trans.get("isotope_ir192"),
-            self.trans.get("isotope_se75"),
-            self.trans.get("isotope_co60"),
-            self.trans.get("isotope_yb169"),
-            self.trans.get("isotope_tm170"),
-        ])
+        for key in ("x_ray", "isotope_ir192", "isotope_se75", "isotope_co60",
+                    "isotope_yb169", "isotope_tm170"):
+            self.cmb_source.addItem(self.trans.get(key), key)
         self.cmb_source.currentIndexChanged.connect(self.on_source_changed)
         grp_inputs_layout.addRow(self.trans.get("rad_source"), self.cmb_source)
 
@@ -124,10 +115,8 @@ class InputPanelMixin:
 
         # Testing class
         self.cmb_class = QComboBox()
-        self.cmb_class.addItems([
-            self.trans.get("class_b"),
-            self.trans.get("class_a")
-        ])
+        for key in ("class_b", "class_a"):
+            self.cmb_class.addItem(self.trans.get(key), key)
         self.cmb_class.currentIndexChanged.connect(self.update_calculations)
         grp_inputs_layout.addRow(self.trans.get("testing_class"), self.cmb_class)
 
@@ -140,12 +129,8 @@ class InputPanelMixin:
 
         # Geometry
         self.cmb_geometry = QComboBox()
-        self.cmb_geometry.addItems([
-            self.trans.get("dwsi"),
-            self.trans.get("swsi"),
-            self.trans.get("dwdi_elliptic"),
-            self.trans.get("dwdi_super")
-        ])
+        for key in ("dwsi", "swsi", "dwdi_elliptic", "dwdi_super"):
+            self.cmb_geometry.addItem(self.trans.get(key), key)
         self.cmb_geometry.currentIndexChanged.connect(self.on_geometry_changed)
         grp_inputs_layout.addRow(self.trans.get("geometry"), self.cmb_geometry)
 

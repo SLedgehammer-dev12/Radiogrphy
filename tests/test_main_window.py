@@ -20,12 +20,22 @@ class TestMainWindowInit(unittest.TestCase):
             cls._app = app
 
     def setUp(self):
+        # Deterministic tests: start from a clean, empty persisted state.
+        from PyQt6.QtCore import QSettings
+        QSettings("Radiography", "Radiography").clear()
         from src.ui.main_window import MainWindow
         self.win = MainWindow()
 
     def tearDown(self):
+        import gc
+        try:
+            self.win.canvas.figure.clf()
+            self.win.std_canvas.figure.clf()
+        except Exception:
+            pass
         self.win.close()
         self.win.deleteLater()
+        gc.collect()
 
     def test_grp_compliance_exists(self):
         self.assertTrue(hasattr(self.win, "grp_compliance"))
@@ -233,6 +243,27 @@ class TestMainWindowInit(unittest.TestCase):
         self.assertEqual(self.win.btn_units.text(), "mm")
         self.assertAlmostEqual(float(self.win.txt_custom_od.text()), 114.3, places=2)
         self.assertAlmostEqual(self.win.get_form_values()[0], 114.3)
+
+    def test_named_preset_application(self):
+        self.win.apply_named_preset("ASME VIII 25 mm SWSI Co-60")
+        self.win.update_calculations()
+        vals = self.win.get_form_values()
+        self.assertAlmostEqual(vals[1], 25.0)            # wall thickness
+        self.assertEqual(self.win.cmb_standard.currentData(), "asme")
+        self.assertEqual(self.win.cmb_geometry.currentData(), "swsi")
+        self.assertEqual(self.win.cmb_source.currentData(), "isotope_co60")
+
+    def test_defect_standard_selector_present(self):
+        self.assertTrue(hasattr(self.win, "cmb_defect_standard"))
+        self.assertTrue(hasattr(self.win, "cmb_b31_service"))
+        self.assertTrue(hasattr(self.win, "cmb_viii_mode"))
+        # ASME B31.3 selected -> service combo visible
+        idx = self.win.cmb_defect_standard.findData("b31_3")
+        self.assertGreaterEqual(idx, 0)
+        self.win.cmb_defect_standard.setCurrentIndex(idx)
+        self.win._on_defect_standard_changed()
+        self.assertFalse(self.win.cmb_b31_service.isHidden())
+        self.assertTrue(self.win.cmb_quality_level.isHidden())
 
     def test_geometry_override_parsing(self):
         f, b = self.win.get_geometry_override_inputs()

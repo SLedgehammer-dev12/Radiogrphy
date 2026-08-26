@@ -22,7 +22,8 @@ class WeldSketchCanvas(FigureCanvas):
         self.axes.set_facecolor('#1e1e2e')
 
     def draw_setup(self, OD, t, cap, geometry, sfd, lang_obj, is_dark=True,
-                   panel_width=None, panel_height=None, overlap_pct=10.0, n_panel=None):
+                   panel_width=None, panel_height=None, overlap_pct=10.0, n_panel=None,
+                   safety_radius_m=None):
         self.axes.clear()
         
         # Detect background color preference based on theme
@@ -99,12 +100,13 @@ class WeldSketchCanvas(FigureCanvas):
             self.axes.add_patch(beam_poly)
             
         elif geometry == "dwdi_elliptic":
-            # DWDI Elliptic: Source outside, offset by a small angle (e.g. 15 degrees)
-            # Detector on opposite side
+            # DWDI Elliptic: Source outside, offset so the weld is projected as
+            # an ellipse. Beam angle 10-15 deg -> offset x = SFD * tan(alpha).
             y_s = sfd - R
-            # Offset source to create elliptical projection of top weld
-            xs_offset = R * 0.4
             angle_deg = 15.0  # typical elliptical projection beam angle
+            xs_offset = sfd * np.tan(np.radians(angle_deg))
+            # Keep the offset within the drawn pipe region for legibility
+            xs_offset = min(xs_offset, R * 0.9)
             self.axes.plot(xs_offset, y_s, marker='o', color=source_color, markersize=10, label=lang_obj.get("source"))
 
             # Detector at bottom (centered around -xs_offset)
@@ -154,6 +156,17 @@ class WeldSketchCanvas(FigureCanvas):
             beam_poly = patches.Polygon([[0, y_s], [det_x1, det_y1], [det_x2, det_y2]], facecolor=beam_color, alpha=0.1)
             self.axes.add_patch(beam_poly)
 
+        # Radiation safety perimeter (metre-scale value, drawn scaled to fit)
+        ring_r = 0.0
+        if safety_radius_m is not None and safety_radius_m > 0.0:
+            ring_r = max(R * 1.8, min(safety_radius_m * 0.05, R * 4.0))
+            ring = patches.Circle((0, 0), ring_r, color=weld_color, fill=False,
+                                  linewidth=1.5, linestyle='--', alpha=0.7)
+            self.axes.add_patch(ring)
+            self.axes.text(ring_r * 0.7, ring_r * 0.7,
+                           f"{lang_obj.get('safety_ring')}: R≈{safety_radius_m:.0f} m",
+                           color=text_color, fontsize=7, alpha=0.85)
+
         # Flat-panel DDA coverage overlay (digital mode, when panel width is provided)
         if panel_width is not None:
             pw = max(10.0, float(panel_width))
@@ -180,6 +193,11 @@ class WeldSketchCanvas(FigureCanvas):
         if panel_width is None:
             self.axes.set_xlim(-R - padding, R + padding)
             self.axes.set_ylim(-R - padding, max(R + padding, sfd - R + padding) if geometry != "swsi" else R + padding)
+        if ring_r > 0.0:
+            self.axes.set_xlim(min(self.axes.get_xlim()[0], -ring_r * 1.05),
+                               max(self.axes.get_xlim()[1], ring_r * 1.05))
+            self.axes.set_ylim(min(self.axes.get_ylim()[0], -ring_r * 1.05),
+                               max(self.axes.get_ylim()[1], ring_r * 1.05))
         
         # Legend (neat, modern style)
         self.axes.legend(loc='upper right', framealpha=0.1, facecolor=bg_color, edgecolor=text_color, labelcolor=text_color, fontsize=8)

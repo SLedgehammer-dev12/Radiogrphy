@@ -33,6 +33,10 @@ class MainWindow(QMainWindow,
                   DefectPanelMixin,
                   WarningsPanelMixin,
                   CompliancePanelMixin):
+    # Cache of the last application-wide stylesheet, so the heavy
+    # app.setStyleSheet() re-polish is only done when the theme actually changes.
+    _app_css_cache = None
+
     def __init__(self):
         super().__init__()
         
@@ -134,6 +138,8 @@ class MainWindow(QMainWindow,
             "cmb_chart_source": None,
             "cmb_standard": None,
             "cmb_collimator": None,
+            "cmb_gamma_convention": None,
+            "cmb_asme_sensitivity": None,
         }
         for combo_name in combo_map:
             w = getattr(self, combo_name, None)
@@ -153,9 +159,15 @@ class MainWindow(QMainWindow,
             "txt_base_e": "3.0",
             "txt_barrier_limit": "20.0",
             "txt_report_no": "",
+            "txt_report_rev": "",
             "txt_project": "",
             "txt_welder_id": "",
+            "txt_joint_id": "",
             "txt_wps_pqr": "",
+            "txt_lvl2_name": "",
+            "txt_lvl2_cert": "",
+            "txt_lvl3_name": "",
+            "txt_lvl3_cert": "",
             "txt_procedure_no": "",
             "txt_device_serial": "",
             "txt_calibration_date": "",
@@ -215,7 +227,8 @@ class MainWindow(QMainWindow,
             "cmb_material", "cmb_source", "cmb_class", "cmb_od",
             "cmb_t", "cmb_geometry", "cmb_film_class_used",
             "cmb_detector_type", "cmb_chart_source",
-            "cmb_standard", "cmb_collimator",
+            "cmb_standard", "cmb_collimator", "cmb_gamma_convention",
+            "cmb_asme_sensitivity",
         ]
         for combo_name in combo_map:
             idx = s.value(f"form/{combo_name}", type=int)
@@ -231,7 +244,8 @@ class MainWindow(QMainWindow,
             "txt_custom_od", "txt_custom_t", "txt_cap", "txt_weld_width", "txt_d",
             "txt_app_sfd", "txt_output", "txt_app_activity", "txt_base_e",
             "txt_barrier_limit",
-            "txt_report_no", "txt_project", "txt_welder_id", "txt_wps_pqr",
+            "txt_report_no", "txt_report_rev", "txt_project", "txt_welder_id", "txt_joint_id", "txt_wps_pqr",
+            "txt_lvl2_name", "txt_lvl2_cert", "txt_lvl3_name", "txt_lvl3_cert",
             "txt_procedure_no", "txt_device_serial", "txt_calibration_date", "txt_personnel",
             "txt_panel_width", "txt_panel_height", "txt_panel_overlap",
             "txt_app_exposures", "txt_base_multiplier", "txt_f_source",
@@ -421,6 +435,30 @@ class MainWindow(QMainWindow,
         self.txt_barrier_limit.textChanged.connect(self.update_calculations)
         grp_exposure_layout.addRow(self.lbl_barrier_limit, self.txt_barrier_limit)
 
+        # Gamma dose-rate convention (R vs mSv) for the barrier calculation
+        self.lbl_gamma_convention = QLabel(self.trans.get("gamma_convention"))
+        self.cmb_gamma_convention = QComboBox()
+        self.cmb_gamma_convention.addItem(self.trans.get("gamma_conv_r"), "r")
+        self.cmb_gamma_convention.addItem(self.trans.get("gamma_conv_msv"), "msv")
+        self.cmb_gamma_convention.setToolTip(self.trans.get("tt_gamma_convention"))
+        self.cmb_gamma_convention.currentIndexChanged.connect(self.update_calculations)
+        grp_exposure_layout.addRow(self.lbl_gamma_convention, self.cmb_gamma_convention)
+
+        # Isotope decay tool (auto-fills current activity)
+        self.btn_decay = QPushButton(self.trans.get("decay_dialog"))
+        self.btn_decay.clicked.connect(self.open_decay_dialog)
+        self.btn_decay.setObjectName("ExportBtn")
+        grp_exposure_layout.addRow(self.btn_decay)
+
+        # ASME/ASTM IQI sensitivity (T-276) - visible when ASME standard
+        self.lbl_asme_sensitivity = QLabel(self.trans.get("asme_sensitivity"))
+        self.cmb_asme_sensitivity = QComboBox()
+        self.cmb_asme_sensitivity.addItem(self.trans.get("sens_2_2t"), "2-2T")
+        self.cmb_asme_sensitivity.addItem(self.trans.get("sens_2_1t"), "2-1T")
+        self.cmb_asme_sensitivity.addItem(self.trans.get("sens_1_2t"), "1-2T")
+        self.cmb_asme_sensitivity.currentIndexChanged.connect(self.update_calculations)
+        grp_exposure_layout.addRow(self.lbl_asme_sensitivity, self.cmb_asme_sensitivity)
+
         # Chart Source
         self.cmb_chart_source = QComboBox()
         self.cmb_chart_source.addItem(self.trans.get("chart_model"), "model")
@@ -552,13 +590,19 @@ class MainWindow(QMainWindow,
         self.grp_report_info.setLayout(grp_report_layout)
         self._report_fields = [
             ("txt_report_no", "report_no", ""),
+            ("txt_report_rev", "report_rev", ""),
             ("txt_project", "project", ""),
             ("txt_welder_id", "welder_id", ""),
+            ("txt_joint_id", "joint_id", ""),
             ("txt_wps_pqr", "wps_pqr", ""),
             ("txt_procedure_no", "procedure_no", ""),
             ("txt_device_serial", "device_serial", ""),
             ("txt_calibration_date", "calibration_date", ""),
             ("txt_personnel", "personnel", ""),
+            ("txt_lvl2_name", "lvl2_name", ""),
+            ("txt_lvl2_cert", "lvl2_cert", ""),
+            ("txt_lvl3_name", "lvl3_name", ""),
+            ("txt_lvl3_cert", "lvl3_cert", ""),
         ]
         self._report_labels = {}
         for attr, key, default in self._report_fields:
@@ -733,8 +777,13 @@ class MainWindow(QMainWindow,
 
         self._setup_input_validation()
 
-        # Auto-check for updates on startup (silent)
-        QTimer.singleShot(2000, lambda: self.check_for_updates(silent=True))
+        # Auto-check for updates on startup (silent). A member QTimer parented
+        # to this window is destroyed with it, so a pending timeout can never
+        # fire on a deleted widget (avoids a Qt abort during shutdown/tests).
+        self._update_timer = QTimer(self)
+        self._update_timer.setSingleShot(True)
+        self._update_timer.timeout.connect(lambda: self.check_for_updates(silent=True))
+        self._update_timer.start(2000)
 
     def on_activity_unit_changed(self):
         unit = self.cmb_activity_unit.currentText()
@@ -918,6 +967,9 @@ class MainWindow(QMainWindow,
                 self.cmb_collimator.setVisible(False)
                 self.lbl_barrier_limit.setVisible(False)
                 self.txt_barrier_limit.setVisible(False)
+                self.lbl_gamma_convention.setVisible(False)
+                self.cmb_gamma_convention.setVisible(False)
+                self.btn_decay.setVisible(False)
         else: # Isotopes
             # Hide Amperage & Voltage, Show Activity
             self.lbl_output.setVisible(False)
@@ -935,6 +987,9 @@ class MainWindow(QMainWindow,
                 self.cmb_collimator.setVisible(True)
                 self.lbl_barrier_limit.setVisible(True)
                 self.txt_barrier_limit.setVisible(True)
+                self.lbl_gamma_convention.setVisible(True)
+                self.cmb_gamma_convention.setVisible(True)
+                self.btn_decay.setVisible(True)
 
             self._update_base_e()
             if hasattr(self, 'lbl_focal_size'):
@@ -1119,42 +1174,27 @@ class MainWindow(QMainWindow,
         # Re-populate dropdowns with current language text
         material_idx = self.cmb_material.currentIndex()
         self.cmb_material.clear()
-        self.cmb_material.addItems([
-            self.trans.get("steel"),
-            self.trans.get("aluminum"),
-            self.trans.get("titanium"),
-            self.trans.get("copper_nickel")
-        ])
+        for key in ("steel", "aluminum", "titanium", "copper_nickel"):
+            self.cmb_material.addItem(self.trans.get(key), key)
         self.cmb_material.setCurrentIndex(material_idx)
 
         source_idx = self.cmb_source.currentIndex()
         self.cmb_source.clear()
-        self.cmb_source.addItems([
-            self.trans.get("x_ray"),
-            self.trans.get("isotope_ir192"),
-            self.trans.get("isotope_se75"),
-            self.trans.get("isotope_co60"),
-            self.trans.get("isotope_yb169"),
-            self.trans.get("isotope_tm170"),
-        ])
+        for key in ("x_ray", "isotope_ir192", "isotope_se75", "isotope_co60",
+                    "isotope_yb169", "isotope_tm170"):
+            self.cmb_source.addItem(self.trans.get(key), key)
         self.cmb_source.setCurrentIndex(source_idx)
 
         class_idx = self.cmb_class.currentIndex()
         self.cmb_class.clear()
-        self.cmb_class.addItems([
-            self.trans.get("class_b"),
-            self.trans.get("class_a")
-        ])
+        for key in ("class_b", "class_a"):
+            self.cmb_class.addItem(self.trans.get(key), key)
         self.cmb_class.setCurrentIndex(class_idx)
 
         geom_idx = self.cmb_geometry.currentIndex()
         self.cmb_geometry.clear()
-        self.cmb_geometry.addItems([
-            self.trans.get("dwsi"),
-            self.trans.get("swsi"),
-            self.trans.get("dwdi_elliptic"),
-            self.trans.get("dwdi_super")
-        ])
+        for key in ("dwsi", "swsi", "dwdi_elliptic", "dwdi_super"):
+            self.cmb_geometry.addItem(self.trans.get(key), key)
         self.cmb_geometry.setCurrentIndex(geom_idx)
 
         # Update input labels & text boxes labels
@@ -1249,10 +1289,32 @@ class MainWindow(QMainWindow,
             self.cmb_standard.setCurrentIndex(std_idx)
             self.cmb_standard.blockSignals(False)
 
+        # ASME IQI sensitivity retranslation
+        if hasattr(self, "cmb_asme_sensitivity"):
+            s_idx = self.cmb_asme_sensitivity.currentIndex()
+            self.lbl_asme_sensitivity.setText(self.trans.get("asme_sensitivity"))
+            self.cmb_asme_sensitivity.blockSignals(True)
+            self.cmb_asme_sensitivity.clear()
+            self.cmb_asme_sensitivity.addItem(self.trans.get("sens_2_2t"), "2-2T")
+            self.cmb_asme_sensitivity.addItem(self.trans.get("sens_2_1t"), "2-1T")
+            self.cmb_asme_sensitivity.addItem(self.trans.get("sens_1_2t"), "1-2T")
+            self.cmb_asme_sensitivity.setCurrentIndex(s_idx)
+            self.cmb_asme_sensitivity.blockSignals(False)
+
         # Collimator / barrier limit labels
         if hasattr(self, "lbl_collimator"):
             self.lbl_collimator.setText(self.trans.get("collimator"))
             self.lbl_barrier_limit.setText(self.trans.get("barrier_limit_label"))
+            self.lbl_gamma_convention.setText(self.trans.get("gamma_convention"))
+            self.cmb_gamma_convention.setToolTip(self.trans.get("tt_gamma_convention"))
+            g_idx = self.cmb_gamma_convention.currentIndex()
+            self.cmb_gamma_convention.blockSignals(True)
+            self.cmb_gamma_convention.clear()
+            self.cmb_gamma_convention.addItem(self.trans.get("gamma_conv_r"), "r")
+            self.cmb_gamma_convention.addItem(self.trans.get("gamma_conv_msv"), "msv")
+            self.cmb_gamma_convention.setCurrentIndex(g_idx)
+            self.cmb_gamma_convention.blockSignals(False)
+            self.btn_decay.setText(self.trans.get("decay_dialog"))
 
         if self.cmb_iqi_type.currentData() == "step_hole":
             self.lbl_app_wire.setText(self.trans.get("applied_step_hole"))
@@ -1296,7 +1358,9 @@ class MainWindow(QMainWindow,
     # Main dimensional inputs that participate in the mm <-> inch toggle.
     _MM_FIELDS = [
         "txt_custom_od", "txt_custom_t", "txt_cap", "txt_weld_width",
-        "txt_d", "txt_app_sfd",
+        "txt_d", "txt_app_sfd", "txt_dd", "txt_bed", "txt_bgap",
+        "txt_panel_width", "txt_panel_height", "txt_app_overlap",
+        "txt_f_source", "txt_b_object",
     ]
 
     def _to_mm(self, value):
@@ -1321,6 +1385,62 @@ class MainWindow(QMainWindow,
             w.blockSignals(False)
         self.btn_units.setText("inç" if self.use_inch else "mm")
         self.update_calculations()
+
+    def open_decay_dialog(self):
+        """Isotope decay tool: computes the current activity from the initial
+        activity and calibration date, and can apply it to the form."""
+        source_keys = ["x_ray", "isotope_ir192", "isotope_se75", "isotope_co60",
+                       "isotope_yb169", "isotope_tm170"]
+        source = source_keys[self.cmb_source.currentIndex()]
+        if source == "x_ray":
+            return
+        dlg = QDialog(self)
+        dlg.setWindowTitle(self.trans.get("decay_dialog"))
+        form = QFormLayout(dlg)
+        txt_serial = QLineEdit()
+        txt_serial.setPlaceholderText("Ir-192 / Sn 12345")
+        txt_a0 = QLineEdit("40.0")
+        txt_calib = QLineEdit("")
+        txt_calib.setPlaceholderText("YYYY-MM-DD")
+        lbl_current = QLabel("-")
+
+        def _update():
+            try:
+                a0 = float(txt_a0.text().strip().replace(",", "."))
+            except ValueError:
+                lbl_current.setText("-")
+                return
+            current = self.calc.calculate_decayed_activity(
+                a0, txt_calib.text().strip(), None, source)
+            lbl_current.setText(f"{current:.1f} Ci")
+
+        txt_a0.textChanged.connect(lambda *_: _update())
+        txt_calib.textChanged.connect(lambda *_: _update())
+        form.addRow(self.trans.get("decay_serial"), txt_serial)
+        form.addRow(self.trans.get("decay_initial"), txt_a0)
+        form.addRow(self.trans.get("decay_calib_date"), txt_calib)
+        form.addRow(self.trans.get("decay_current"), lbl_current)
+
+        def _apply():
+            try:
+                current = self.calc.calculate_decayed_activity(
+                    float(txt_a0.text().strip().replace(",", ".")),
+                    txt_calib.text().strip(), None, source)
+            except ValueError:
+                current = 0.0
+            if current > 0.0:
+                unit = self.cmb_activity_unit.currentText() if hasattr(self, "cmb_activity_unit") else "Ci"
+                self.txt_app_activity.setText(
+                    f"{current * 37.0:.1f}" if unit == "GBq" else f"{current:.1f}")
+            dlg.accept()
+
+        btn_apply = QPushButton(self.trans.get("decay_apply"))
+        btn_cancel = QPushButton(self.trans.get("dialog_cancel"))
+        btn_apply.clicked.connect(_apply)
+        btn_cancel.clicked.connect(dlg.reject)
+        form.addRow(btn_apply, btn_cancel)
+        _update()
+        dlg.exec()
 
     def open_level3_dialog(self):
         dlg = Level3Dialog(self.trans, self, is_dark=self.is_dark_theme)
@@ -1495,8 +1615,8 @@ class MainWindow(QMainWindow,
             except ValueError:
                 return default
 
-        panel_width = max(10.0, _float(self.txt_panel_width, 200.0))
-        panel_height = max(10.0, _float(self.txt_panel_height, 200.0))
+        panel_width = self._to_mm(max(10.0, _float(self.txt_panel_width, 200.0)))
+        panel_height = self._to_mm(max(10.0, _float(self.txt_panel_height, 200.0)))
         overlap = _float(self.txt_panel_overlap, 10.0)
         overlap = max(0.0, min(overlap, 50.0))
         app_exposures = self.get_applied_exposures()
@@ -1516,7 +1636,7 @@ class MainWindow(QMainWindow,
                 return None
             if val <= 0.0:
                 return None
-            return val
+            return self._to_mm(val)
         return _float_opt(self.txt_f_source), _float_opt(self.txt_b_object)
 
     def get_base_multiplier(self):
@@ -1538,6 +1658,36 @@ class MainWindow(QMainWindow,
         return info
 
     # --- Presets / project data management ---------------------------------
+
+    _NAMED_PRESETS = {
+        "4 inç SCH40 DWDI X-Ray Atölye": {
+            "cmb_source": "x_ray", "cmb_geometry": "dwdi_elliptic",
+            "cmb_od": '4" (NPS 4)', "txt_custom_od": "", "txt_custom_t": "",
+            "txt_output": "5.0", "txt_app_kv": "200",
+        },
+        "16 inç DWSI Ir-192 Saha": {
+            "cmb_source": "isotope_ir192", "cmb_geometry": "dwsi",
+            "cmb_od": '16" (NPS 16)', "txt_custom_od": "", "txt_custom_t": "",
+            "txt_app_activity": "40.0",
+        },
+        "2 inç DDA Dijital RT": {
+            "rad_digital": True, "rad_analog": False,
+            "cmb_geometry": "dwsi", "cmb_od": '2" (NPS 2)',
+            "txt_custom_od": "", "txt_custom_t": "",
+        },
+        "ASME VIII 25 mm SWSI Co-60": {
+            "cmb_source": "isotope_co60", "cmb_geometry": "swsi",
+            "cmb_standard": "asme", "txt_custom_od": "500", "txt_custom_t": "25",
+        },
+    }
+
+    def apply_named_preset(self, name):
+        preset = self._NAMED_PRESETS.get(name)
+        if not preset:
+            return
+        state = self.collect_form_state()
+        state.update(preset)
+        self.apply_form_state(state)
 
     _PRESET_COMBOS = [
         "cmb_material", "cmb_source", "cmb_class", "cmb_od", "cmb_t",
@@ -1586,8 +1736,19 @@ class MainWindow(QMainWindow,
             self.trans.set_language(state["language"])
         for attr in self._PRESET_COMBOS:
             w = getattr(self, attr, None)
-            idx = state.get(attr)
-            if w is not None and isinstance(idx, int) and 0 <= idx < w.count():
+            val = state.get(attr)
+            if w is None or val is None:
+                continue
+            if isinstance(val, int):
+                idx = val
+            elif isinstance(val, str):
+                try:
+                    idx = int(val)
+                except ValueError:
+                    idx = w.findData(val)
+            else:
+                idx = w.findData(val)
+            if 0 <= idx < w.count():
                 w.blockSignals(True)
                 w.setCurrentIndex(idx)
                 w.blockSignals(False)
@@ -1595,12 +1756,14 @@ class MainWindow(QMainWindow,
             w = getattr(self, attr, None)
             if w is not None and attr in state:
                 w.setText(str(state[attr]))
-        if "rad_analog" in state:
-            self.rad_analog.setChecked(bool(state["rad_analog"]))
-        if "rad_detector_flat" in state:
-            self.rad_detector_flat.setChecked(bool(state["rad_detector_flat"]))
-        if "chk_source_side_iqi" in state:
-            self.chk_source_side_iqi.setChecked(bool(state["chk_source_side_iqi"]))
+        for attr, widget in (("rad_analog", self.rad_analog),
+                             ("rad_detector_flat", self.rad_detector_flat),
+                             ("chk_source_side_iqi", self.chk_source_side_iqi)):
+            if attr in state:
+                v = state[attr]
+                if isinstance(v, str):
+                    v = v.lower() in ("1", "true", "yes", "checked")
+                widget.setChecked(bool(v))
         self.retranslate_ui()
         self.update_calculations()
 
@@ -1664,6 +1827,40 @@ class MainWindow(QMainWindow,
         except Exception as e:
             QMessageBox.critical(self, "Error", f"Could not import project: {e}")
 
+    def export_project_csv(self):
+        import csv
+        filepath, _ = QFileDialog.getSaveFileName(self, "Export Project (CSV)", "rt_project.csv", "CSV Files (*.csv)")
+        if not filepath:
+            return
+        try:
+            with open(filepath, "w", newline="", encoding="utf-8") as f:
+                w = csv.writer(f)
+                w.writerow(["field", "value"])
+                for k, v in self.collect_form_state().items():
+                    w.writerow([k, v])
+                for k, v in (self.last_calculated or {}).items():
+                    w.writerow([k, v])
+            QMessageBox.information(self, "Success", f"Project exported: {filepath}")
+        except Exception as e:
+            QMessageBox.critical(self, "Error", f"Could not export CSV: {e}")
+
+    def import_project_csv(self):
+        import csv
+        filepath, _ = QFileDialog.getOpenFileName(self, "Import Project (CSV)", "", "CSV Files (*.csv)")
+        if not filepath:
+            return
+        try:
+            state = {}
+            with open(filepath, "r", encoding="utf-8") as f:
+                for row in csv.reader(f):
+                    if len(row) >= 2 and row[0] != "field":
+                        state[row[0]] = row[1]
+            if state:
+                self.apply_form_state(state)
+                QMessageBox.information(self, "Success", f"Project imported: {filepath}")
+        except Exception as e:
+            QMessageBox.critical(self, "Error", f"Could not import CSV: {e}")
+
     def update_calculations(self):
         # 1. Fetch values
         od, t, cap, weld_width, d, sfd, output_val, base_e, detector_type, film_class_used, chart_source = self.get_form_values()
@@ -1707,11 +1904,11 @@ class MainWindow(QMainWindow,
         is_curved = self.rad_detector_curved.isChecked()
         std_figure = self.cmb_std_figure.currentData() if hasattr(self, 'cmb_std_figure') else None
         try:
-            bed = float(self.txt_bed.text().replace(",", "."))
+            bed = self._to_mm(float(self.txt_bed.text().replace(",", ".")))
         except ValueError:
             bed = 0.0
         try:
-            bgap = float(self.txt_bgap.text().replace(",", "."))
+            bgap = self._to_mm(float(self.txt_bgap.text().replace(",", ".")))
         except ValueError:
             bgap = 5.0
 
@@ -1730,7 +1927,7 @@ class MainWindow(QMainWindow,
 
         # SDD formula (6)/(7): ensure detector coverage
         try:
-            dd = float(self.txt_dd.text().replace(",", "."))
+            dd = self._to_mm(float(self.txt_dd.text().replace(",", ".")))
         except ValueError:
             dd = 200.0
         sdd_min = self.calc.calculate_sdd_min(dd)
@@ -1745,6 +1942,11 @@ class MainWindow(QMainWindow,
 
         # Inspection standard (ISO 17636 / ASME Sec V Art 2)
         standard = self.cmb_standard.currentData() if hasattr(self, "cmb_standard") else "iso"
+
+        # ASME/ASTM IQI sensitivity selector visibility (ASME only)
+        if hasattr(self, "cmb_asme_sensitivity"):
+            self.lbl_asme_sensitivity.setVisible(standard == "asme")
+            self.cmb_asme_sensitivity.setVisible(standard == "asme")
 
         # ASME Sec V Art 2 geometric unsharpness (Ug) limit check
         ug_ok, ug_limit = self.calc.check_ug_compliance(ug, t, standard)
@@ -2149,7 +2351,7 @@ class MainWindow(QMainWindow,
         # Film Overlap warning
         if tech == "analog":
             try:
-                overlap = float(self.txt_app_overlap.text().replace(",", "."))
+                overlap = self._to_mm(float(self.txt_app_overlap.text().replace(",", ".")))
             except ValueError:
                 overlap = 10.0
             if overlap < 10.0:
@@ -2212,7 +2414,8 @@ class MainWindow(QMainWindow,
         # ASME/ASTM IQI output (ASME Sec V Art 2 only)
         if standard == "asme":
             if iqi_type == "step_hole":
-                hole = self.calc.get_astm_iqi_hole(t)
+                sensitivity = self.cmb_asme_sensitivity.currentData() if hasattr(self, "cmb_asme_sensitivity") else "2-2T"
+                hole = self.calc.get_astm_iqi_hole(t, sensitivity)
                 asme_iqi_str = f"{hole['designator']} (T={hole['iqi_t_mm']:.2f} mm, delik ∅={hole['hole_dia_mm']:.2f} mm) [ASTM E1025]"
             else:
                 wire = self.calc.get_astm_iqi_wire(w_nom)
@@ -2228,11 +2431,14 @@ class MainWindow(QMainWindow,
                 limit_usvh = float(self.txt_barrier_limit.text().replace(",", "."))
             except ValueError:
                 limit_usvh = 20.0
+            convention = self.cmb_gamma_convention.currentData() if hasattr(self, "cmb_gamma_convention") else "r"
             r_controlled, dose_1m, reduction = self.calc.calculate_barrier_distance(
-                source, output_val, limit_usvh=limit_usvh, hvl_layers=hvl_layers
+                source, output_val, limit_usvh=limit_usvh, hvl_layers=hvl_layers,
+                convention=convention,
             )
             r_supervised, _, _ = self.calc.calculate_barrier_distance(
-                source, output_val, limit_usvh=7.5, hvl_layers=hvl_layers
+                source, output_val, limit_usvh=7.5, hvl_layers=hvl_layers,
+                convention=convention,
             )
             if self.trans.language == "tr":
                 barrier_str = f"Kontrollü ({limit_usvh:.0f} µSv/h): {r_controlled:.1f} m | Gözetimli (7.5): {r_supervised:.1f} m"
@@ -2242,6 +2448,7 @@ class MainWindow(QMainWindow,
             barrier_str = "N/A"
             hvl_layers = 0.0
             limit_usvh = 20.0
+            convention = "r"
         self.out_labels["barrier_distance"][1].setText(barrier_str)
 
         self._update_output_visibility()
@@ -2272,6 +2479,8 @@ class MainWindow(QMainWindow,
             "standard": standard,
             "asme_iqi": asme_iqi_str,
             "barrier_distance": barrier_str,
+            "barrier_radius_m": r_controlled if source != "x_ray" else 0.0,
+            "gamma_convention": convention,
             "collimator_hvl": hvl_layers,
             "barrier_limit_usvh": limit_usvh,
             "f_min": f_min,
@@ -2306,13 +2515,16 @@ class MainWindow(QMainWindow,
             self.lbl_dynamic_standard_ref.setText(f"{self.trans.get('standard_fig')} {self.cmb_std_figure.currentText()}")
 
         # Update weld sketch canvas
+        safety_r = r_controlled if source != "x_ray" else None
         if tech == "digital":
             panel_w, panel_h, overlap_pct, _ = self.get_panel_inputs()
             self.canvas.draw_setup(od, t, cap, geometry, sfd, self.trans, self.is_dark_theme,
                                    panel_width=panel_w, panel_height=panel_h,
-                                   overlap_pct=overlap_pct, n_panel=n_panel)
+                                   overlap_pct=overlap_pct, n_panel=n_panel,
+                                   safety_radius_m=safety_r)
         else:
-            self.canvas.draw_setup(od, t, cap, geometry, sfd, self.trans, self.is_dark_theme)
+            self.canvas.draw_setup(od, t, cap, geometry, sfd, self.trans, self.is_dark_theme,
+                                   safety_radius_m=safety_r)
 
         # Automatically check compliance
         self.check_procedure_compliance()
@@ -2340,13 +2552,25 @@ class MainWindow(QMainWindow,
             accum = 0.0
 
         is_accepted, reason = self.api_eval.evaluate(defect_type, t, length, width, accum, self.trans.language)
-        # Route to ISO 5817 when that standard is selected
+        # Route to the selected defect standard
         defect_standard = self.cmb_defect_standard.currentData()
         if defect_standard == "iso5817":
             from src.core.iso5817 import ISO5817Evaluator
             level = self.cmb_quality_level.currentText()
             is_accepted, reason = ISO5817Evaluator().evaluate(
                 defect_type, t, length, width, accum, level=level, lang=self.trans.language
+            )
+        elif defect_standard == "b31_3":
+            from src.core.asme_b31_3 import ASMEB31_3Evaluator
+            service = self.cmb_b31_service.currentData()
+            is_accepted, reason = ASMEB31_3Evaluator().evaluate(
+                defect_type, t, length, width, accum, service=service, lang=self.trans.language
+            )
+        elif defect_standard == "viii":
+            from src.core.asme_viii import ASMEVIIIEvaluator
+            mode = self.cmb_viii_mode.currentData()
+            is_accepted, reason = ASMEVIIIEvaluator().evaluate(
+                defect_type, t, length, width, accum, mode=mode, lang=self.trans.language
             )
 
         if is_accepted:
@@ -2395,7 +2619,7 @@ class MainWindow(QMainWindow,
         applied_film_class = self.cmb_film_class_used.currentText()
 
         try:
-            applied_overlap = float(self.txt_app_overlap.text().replace(",", "."))
+            applied_overlap = self._to_mm(float(self.txt_app_overlap.text().replace(",", ".")))
         except ValueError:
             applied_overlap = 0.0
 
@@ -2509,7 +2733,7 @@ class MainWindow(QMainWindow,
             input_kv = 120.0
 
         try:
-            overlap = float(self.txt_app_overlap.text().replace(",", "."))
+            overlap = self._to_mm(float(self.txt_app_overlap.text().replace(",", ".")))
         except ValueError:
             overlap = 10.0
 
@@ -2545,11 +2769,11 @@ class MainWindow(QMainWindow,
         is_curved = self.rad_detector_curved.isChecked()
         std_figure = self.cmb_std_figure.currentData() if hasattr(self, 'cmb_std_figure') else None
         try:
-            bed = float(self.txt_bed.text().replace(",", "."))
+            bed = self._to_mm(float(self.txt_bed.text().replace(",", ".")))
         except ValueError:
             bed = 0.0
         try:
-            bgap = float(self.txt_bgap.text().replace(",", "."))
+            bgap = self._to_mm(float(self.txt_bgap.text().replace(",", ".")))
         except ValueError:
             bgap = 5.0
         if is_curved and self.calc.is_central_projection(geometry, std_figure):
@@ -2561,7 +2785,7 @@ class MainWindow(QMainWindow,
         f_min = self.calc.calculate_f_min(d, b_dist, testing_class, t)
         sfd_min = f_min + b_dist
         try:
-            dd = float(self.txt_dd.text().replace(",", "."))
+            dd = self._to_mm(float(self.txt_dd.text().replace(",", ".")))
         except ValueError:
             dd = 200.0
         sdd_min = self.calc.calculate_sdd_min(dd)
@@ -2711,6 +2935,12 @@ class MainWindow(QMainWindow,
         act_load_preset = QAction("Load Preset (Şablon)", self)
         act_load_preset.triggered.connect(self.load_form_preset)
         data_menu.addAction(act_load_preset)
+        # Named built-in templates
+        named_menu = data_menu.addMenu("Hazır Şablonlar")
+        for name in self._NAMED_PRESETS:
+            act = QAction(name, self)
+            act.triggered.connect(lambda _, n=name: self.apply_named_preset(n))
+            named_menu.addAction(act)
         data_menu.addSeparator()
         act_export = QAction("Export Project (JSON)", self)
         act_export.triggered.connect(self.export_project_json)
@@ -2718,6 +2948,12 @@ class MainWindow(QMainWindow,
         act_import = QAction("Import Project (JSON)", self)
         act_import.triggered.connect(self.import_project_json)
         data_menu.addAction(act_import)
+        act_export_csv = QAction("Export Project (CSV)", self)
+        act_export_csv.triggered.connect(self.export_project_csv)
+        data_menu.addAction(act_export_csv)
+        act_import_csv = QAction("Import Project (CSV)", self)
+        act_import_csv.triggered.connect(self.import_project_csv)
+        data_menu.addAction(act_import_csv)
 
         help_menu = menu_bar.addMenu("&Help")
         about_action = QAction(f"About Radiography v{CURRENT_VERSION}", self)
@@ -2846,37 +3082,39 @@ class MainWindow(QMainWindow,
             # Dark Theme Colors: Mocha styled
             from PyQt6.QtWidgets import QApplication
             app = QApplication.instance()
-            if app:
-                app.setStyleSheet("""
-                    QMessageBox {
-                        background-color: #1e1e2e;
-                        color: #cdd6f4;
-                    }
-                    QMessageBox QLabel {
-                        color: #cdd6f4;
-                    }
-                    QMessageBox QPushButton {
-                        background-color: #45475a;
-                        color: #cdd6f4;
-                        border: 1px solid #585b70;
-                        border-radius: 4px;
-                        padding: 6px 12px;
-                        font-weight: bold;
-                        min-width: 80px;
-                    }
-                    QMessageBox QPushButton:hover {
-                        background-color: #585b70;
-                        color: #ffffff;
-                    }
-                    QProgressDialog {
-                        background-color: #1e1e2e;
-                        color: #cdd6f4;
-                    }
-                    QFileDialog {
-                        background-color: #1e1e2e;
-                        color: #cdd6f4;
-                    }
-                """)
+            app_css = """
+                QMessageBox {
+                    background-color: #1e1e2e;
+                    color: #cdd6f4;
+                }
+                QMessageBox QLabel {
+                    color: #cdd6f4;
+                }
+                QMessageBox QPushButton {
+                    background-color: #45475a;
+                    color: #cdd6f4;
+                    border: 1px solid #585b70;
+                    border-radius: 4px;
+                    padding: 6px 12px;
+                    font-weight: bold;
+                    min-width: 80px;
+                }
+                QMessageBox QPushButton:hover {
+                    background-color: #585b70;
+                    color: #ffffff;
+                }
+                QProgressDialog {
+                    background-color: #1e1e2e;
+                    color: #cdd6f4;
+                }
+                QFileDialog {
+                    background-color: #1e1e2e;
+                    color: #cdd6f4;
+                }
+            """
+            if app and app.styleSheet() != app_css:
+                app.setStyleSheet(app_css)
+            self._app_css_cache = app_css if app else None
             self.setStyleSheet("""
                 QMainWindow {
                     background-color: #1e1e2e;
@@ -3004,37 +3242,39 @@ class MainWindow(QMainWindow,
             # Light Theme Colors: Professional slate light
             from PyQt6.QtWidgets import QApplication
             app = QApplication.instance()
-            if app:
-                app.setStyleSheet("""
-                    QMessageBox {
-                        background-color: #f5f5f5;
-                        color: #212121;
-                    }
-                    QMessageBox QLabel {
-                        color: #212121;
-                    }
-                    QMessageBox QPushButton {
-                        background-color: #e0e0e0;
-                        color: #212121;
-                        border: 1px solid #b0bec5;
-                        border-radius: 4px;
-                        padding: 6px 12px;
-                        font-weight: bold;
-                        min-width: 80px;
-                    }
-                    QMessageBox QPushButton:hover {
-                        background-color: #b0bec5;
-                        color: #000000;
-                    }
-                    QProgressDialog {
-                        background-color: #f5f5f5;
-                        color: #212121;
-                    }
-                    QFileDialog {
-                        background-color: #f5f5f5;
-                        color: #212121;
-                    }
-                """)
+            app_css = """
+                QMessageBox {
+                    background-color: #f5f5f5;
+                    color: #212121;
+                }
+                QMessageBox QLabel {
+                    color: #212121;
+                }
+                QMessageBox QPushButton {
+                    background-color: #e0e0e0;
+                    color: #212121;
+                    border: 1px solid #b0bec5;
+                    border-radius: 4px;
+                    padding: 6px 12px;
+                    font-weight: bold;
+                    min-width: 80px;
+                }
+                QMessageBox QPushButton:hover {
+                    background-color: #b0bec5;
+                    color: #000000;
+                }
+                QProgressDialog {
+                    background-color: #f5f5f5;
+                    color: #212121;
+                }
+                QFileDialog {
+                    background-color: #f5f5f5;
+                    color: #212121;
+                }
+            """
+            if app and app.styleSheet() != app_css:
+                app.setStyleSheet(app_css)
+            self._app_css_cache = app_css if app else None
             self.setStyleSheet("""
                 QMainWindow {
                     background-color: #f5f5f5;

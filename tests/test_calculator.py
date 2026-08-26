@@ -1048,16 +1048,27 @@ class TestRTCalculatorEdgeCases(unittest.TestCase):
         self.assertEqual(r["designator"], "2-2T")
         self.assertAlmostEqual(r["iqi_t_mm"], 5.0)
         self.assertAlmostEqual(r["hole_dia_mm"], 10.0)
+        # 2-1T: T = t, hole = 2t
+        r = self.calc.get_astm_iqi_hole(10.0, "2-1T")
+        self.assertAlmostEqual(r["iqi_t_mm"], 10.0)
+        self.assertAlmostEqual(r["hole_dia_mm"], 20.0)
+        # 1-2T: T = t/2, hole = T = t/2
+        r = self.calc.get_astm_iqi_hole(10.0, "1-2T")
+        self.assertAlmostEqual(r["iqi_t_mm"], 5.0)
+        self.assertAlmostEqual(r["hole_dia_mm"], 5.0)
 
     def test_astm_iqi_wire(self):
-        # Thin: set A; required wire diameter ~ 2% of thickness
+        # 2% of 5 mm = 0.10 mm -> finest E747 wire >= 0.10 is W16 (Set C)
         r = self.calc.get_astm_iqi_wire(5.0)
-        self.assertEqual(r["set"], "A")
-        self.assertGreaterEqual(r["wire_dia_mm"], 0.02 * 5.0)
-        # Thick: set D
+        self.assertEqual(r["wire_no"], 16)
+        self.assertEqual(r["set"], "C")
+        self.assertGreaterEqual(r["wire_dia_mm"], 0.10)
+        # 2% of 60 mm = 1.20 mm -> W5 (1.27, Set A)
         r = self.calc.get_astm_iqi_wire(60.0)
-        self.assertEqual(r["set"], "D")
-        self.assertGreaterEqual(r["wire_dia_mm"], 0.02 * 60.0)
+        self.assertEqual(r["set"], "A")
+        self.assertGreaterEqual(r["wire_dia_mm"], 1.20)
+        # Wire number determines the set (19-21 -> D)
+        self.assertEqual(self.calc.E747_SETS["D"], (19, 21))
 
     def test_barrier_distance(self):
         # Ir-192, 20 Ci, controlled 20 uSv/h, unshielded
@@ -1091,6 +1102,27 @@ class TestRTCalculatorEdgeCases(unittest.TestCase):
         self.assertAlmostEqual(self.calc.get_ref_factor("titanium"), 0.54)
         self.assertAlmostEqual(self.calc.get_ref_factor("copper_nickel"), 1.4)
         self.assertAlmostEqual(self.calc.equivalent_steel_thickness(10.0, "aluminum"), 1.8)
+
+    def test_isotope_decay_activity(self):
+        from datetime import date, timedelta
+        # No elapsed -> unchanged
+        a = self.calc.calculate_decayed_activity(40.0, date.today().isoformat(), None, "isotope_ir192")
+        self.assertAlmostEqual(a, 40.0)
+        # 30 days Ir-192: A = 40 * 2^(-30/73.83)
+        calib = (date.today() - timedelta(days=30)).isoformat()
+        a = self.calc.calculate_decayed_activity(40.0, calib, None, "isotope_ir192")
+        expected = 40.0 * (2.0 ** (-30.0 / 73.83))
+        self.assertAlmostEqual(a, expected, places=2)
+        # Invalid inputs -> 0
+        self.assertEqual(self.calc.calculate_decayed_activity(0.0, calib, None, "isotope_ir192"), 0.0)
+        self.assertEqual(self.calc.calculate_decayed_activity(-5.0, calib, None, "isotope_ir192"), 0.0)
+
+    def test_barrier_distance_gamma_convention(self):
+        r_r, base_r, _ = self.calc.calculate_barrier_distance("isotope_ir192", 20.0, limit_usvh=20.0, hvl_layers=0.0, convention="r")
+        r_m, base_m, _ = self.calc.calculate_barrier_distance("isotope_ir192", 20.0, limit_usvh=20.0, hvl_layers=0.0, convention="msv")
+        self.assertAlmostEqual(base_r, 0.48 * 20 * 8697.0, places=0)
+        self.assertAlmostEqual(base_m, 4.8 * 20 * 1000.0, places=0)
+        self.assertGreater(r_m, r_r)   # mSv convention (1R~10mSv) gives slightly larger distance
 
 if __name__ == "__main__":
     unittest.main()

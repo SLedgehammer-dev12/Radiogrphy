@@ -5,6 +5,7 @@ from kivymd.uix.dialog import MDDialog
 from kivymd.uix.label import MDLabel
 
 DEFECT_TYPES = ["crack", "ip", "if", "ic", "porosity", "slag", "undercut", "burn_through"]
+DEFECT_STANDARDS = ["api1104", "iso5817", "b31_3", "viii"]
 
 
 class StepResults(MDScreen):
@@ -69,6 +70,35 @@ class StepResults(MDScreen):
             width_mult=4,
         )
         menu.open()
+
+    def open_defect_standard_menu(self):
+        labels = {
+            "api1104": "API 1104",
+            "iso5817": "ISO 5817",
+            "b31_3": "ASME B31.3",
+            "viii": "ASME VIII (UW-51/52)",
+        }
+        items = [{
+            "text": labels[s],
+            "on_release": lambda v=s: self._select_defect_standard(v)
+        } for s in DEFECT_STANDARDS]
+        menu = MDDropdownMenu(
+            caller=self.ids.defect_std_btn,
+            items=items,
+            width_mult=5,
+        )
+        menu.open()
+
+    def _select_defect_standard(self, value):
+        self.state.set("defect_standard", value)
+        labels = {
+            "api1104": "API 1104",
+            "iso5817": "ISO 5817",
+            "b31_3": "ASME B31.3",
+            "viii": "ASME VIII (UW-51/52)",
+        }
+        self.ids.defect_std_btn.text = f"Standart: {labels.get(value, value)}"
+        self.ids.defect_result_label.text = ""
 
     def _select_defect(self, value):
         self.state.set("defect_type", value)

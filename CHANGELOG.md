@@ -1,5 +1,31 @@
 # Changelog
 
+## [Unreleased] - Isotope decay, ASME B31.3/VIII, ASTM accuracy, report approval
+
+### Added
+- Isotope decay engine: `calculate_decayed_activity` (A0·2^(-Δt/T½)) with half-lives
+  for Ir-192, Se-75, Co-60, Yb-169, Tm-170 + an "Isotope Decay Tool" dialog that
+  auto-fills the current activity from serial/initial activity/calibration date
+- Selectable gamma dose-rate convention (R·m²/(h·Ci) or mSv·m²/(h·Ci)) for the
+  radiation barrier calculation
+- Radiation safety perimeter ring drawn on the setup schematic (metre-scale value)
+- ASTM E747 real wire table (wires 1-21, Sets A-D) and ASTM E1025 T-276 hole IQI
+  with selectable 2-2T / 2-1T / 1-2T sensitivity
+- ASME B31.3 Table 341.3.2 defect evaluator (Normal Fluid / Severe Cyclic)
+- ASME Section VIII Div.1 UW-51 / UW-52 defect evaluator
+- Mobile defect-standard selector (API 1104 / ISO 5817 / ASME B31.3 / ASME VIII)
+- Report: Revision No, Joint ID and formal Level II / Level III approval blocks
+  (ISO 9712 / SNT-TC-1A name + certificate, stamp area)
+- CSV project export/import and built-in named inspection presets
+- DWDI elliptical beam angle computed from x = SFD·tan(alpha)
+- Full metric/imperial coverage for detector, bed/bgap, panel and overlap inputs
+
+### Fixed
+- Qt abort in the offscreen test runner caused by re-applying the application-wide
+  stylesheet on every window; the app stylesheet is now only applied when it changes,
+  and the startup update timer is parented to the window
+- Test determinism: QSettings are cleared between tests
+
 ## [1.5.0] - 2026-08-26
 
 ### Added
