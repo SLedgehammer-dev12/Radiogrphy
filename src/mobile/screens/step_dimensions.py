@@ -26,6 +26,7 @@ class StepDimensions(MDScreen):
         self.ids.custom_od.text = str(self.state.pipe_od)
         self.ids.custom_wall.text = str(self.state.pipe_wall)
         self.ids.cap.text = str(self.state.cap)
+        self.ids.weld_width.text = str(self.state.weld_width)
         self.ids.schedule_btn.text = self.state.get("pipe_schedule", "SCH 40 / STD")
 
     def open_pipe_menu(self):
@@ -95,6 +96,12 @@ class StepDimensions(MDScreen):
     def on_cap(self, text):
         try:
             self.state.set("cap", float(text.replace(",", ".")))
+        except ValueError:
+            pass
+
+    def on_weld_width(self, text):
+        try:
+            self.state.set("weld_width", float(text.replace(",", ".")))
         except ValueError:
             pass
 

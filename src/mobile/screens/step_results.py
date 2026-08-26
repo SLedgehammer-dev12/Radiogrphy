@@ -2,6 +2,7 @@ from kivy.metrics import dp
 from kivymd.uix.screen import MDScreen
 from kivymd.uix.menu import MDDropdownMenu
 from kivymd.uix.dialog import MDDialog
+from kivymd.uix.label import MDLabel
 
 DEFECT_TYPES = ["crack", "ip", "if", "ic", "porosity", "slag", "undercut", "burn_through"]
 
@@ -51,6 +52,10 @@ class StepResults(MDScreen):
             label = f"{status} {c.get('name', '')}: {c.get('details', '')}"
             self.ids.compliance_container.add_widget(
                 MDLabel(text=label, size_hint_y=None, height=dp(28))
+            )
+        for w in self.state.warnings or []:
+            self.ids.compliance_container.add_widget(
+                MDLabel(text=f"⚠ {w}", size_hint_y=None, height=dp(28))
             )
 
     def open_defect_menu(self):

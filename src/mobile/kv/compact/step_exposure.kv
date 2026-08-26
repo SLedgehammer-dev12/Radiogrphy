@@ -135,6 +135,25 @@
                         value: app.state.sfd
                         on_value: root.on_slider_sfd(args[1])
 
+                # Field Correction Factor (F)
+                BoxLayout:
+                    size_hint_y: None
+                    height: dp(60)
+                    spacing: dp(8)
+                    MDTextField:
+                        id: multiplier_input
+                        hint_text: "Saha Düzeltme Çarpanı (F)"
+                        text: str(app.state.base_multiplier)
+                        input_filter: "float"
+                        size_hint_x: 1
+                        on_text: root.on_multiplier(self.text)
+                MDLabel:
+                    text: "F: ekipman/teknik doğrulamasıyla belirlenir (1.0 = etkisiz)"
+                    font_style: "Caption"
+                    theme_text_color: "Secondary"
+                    size_hint_y: None
+                    height: dp(20)
+
                 # Film area (visible only for analog)
                 BoxLayout:
                     id: film_area

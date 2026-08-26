@@ -139,6 +139,17 @@ class TestTranslationContent(unittest.TestCase):
                 self.assertIn(key, self.trans.translations[lang],
                               f"Missing sketch tab key '{key}' in '{lang}'")
 
+    def test_base_multiplier_labels(self):
+        # E = exposure chart constant (not a user multiplier); F = field correction factor
+        self.assertEqual(self.trans.translations["tr"]["base_factor"], "Pozlama Tablosu Sabiti (E)")
+        self.assertEqual(self.trans.translations["en"]["base_factor"], "Exposure Chart Constant (E)")
+        self.assertEqual(self.trans.translations["tr"]["base_multiplier"], "Saha Düzeltme Çarpanı (F):")
+        self.assertEqual(self.trans.translations["en"]["base_multiplier"], "Field Correction Factor (F):")
+        self.assertIn("tt_base_factor", self.trans.translations["tr"])
+        self.assertIn("tt_base_factor", self.trans.translations["en"])
+        self.assertIn("base_multiplier_note", self.trans.translations["tr"])
+        self.assertIn("base_multiplier_note", self.trans.translations["en"])
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -112,6 +112,80 @@ class TestMainWindowInit(unittest.TestCase):
         self.assertEqual(self.win.get_base_multiplier(), 1.0)
         self.win.txt_base_multiplier.setText("1.0")
 
+    def test_base_e_label_updates_with_source(self):
+        # X-Ray -> mA·min/m²
+        self.win.cmb_source.setCurrentIndex(0)
+        self.win.on_source_changed()
+        self.assertIn("mA·min/m²", self.win.lbl_base_e.text())
+        self.assertIn("Pozlama Tablosu Sabiti", self.win.lbl_base_e.text())
+        # Ir-192 -> Ci·min/m²
+        self.win.cmb_source.setCurrentIndex(1)
+        self.win.on_source_changed()
+        self.assertIn("Ci·min/m²", self.win.lbl_base_e.text())
+
+    def test_base_e_hidden_when_chart_selected(self):
+        # Physics model -> E visible
+        self.win.cmb_chart_source.setCurrentIndex(0)
+        self.win.on_chart_source_changed()
+        self.assertFalse(self.win.txt_base_e.isHidden())
+        # Chart selected -> E hidden (chart path ignores E)
+        chart_idx = self.win.cmb_chart_source.findData("AA400")
+        if chart_idx >= 0:
+            self.win.cmb_chart_source.setCurrentIndex(chart_idx)
+            self.win.on_chart_source_changed()
+            self.assertTrue(self.win.txt_base_e.isHidden())
+        # Back to model -> E visible again
+        self.win.cmb_chart_source.setCurrentIndex(0)
+        self.win.on_chart_source_changed()
+        self.assertFalse(self.win.txt_base_e.isHidden())
+
+    def test_base_multiplier_label_renamed(self):
+        self.assertEqual(self.win.lbl_base_multiplier.text(), "Saha Düzeltme Çarpanı (F):")
+
+    def test_weld_width_field_exists(self):
+        self.assertTrue(hasattr(self.win, "txt_weld_width"))
+        self.assertTrue(hasattr(self.win, "lbl_weld_width"))
+        self.assertEqual(self.win.lbl_weld_width.text(), "Kaynak Genişliği (mm):")
+
+    def test_weld_width_visibility_dwdi_only(self):
+        # force dwsi explicitly (restored settings may carry another geometry)
+        self.win.cmb_geometry.setCurrentIndex(0)  # dwsi
+        self.win.update_calculations()
+        self.assertTrue(self.win.txt_weld_width.isHidden())
+        # dwdi_elliptic with small pipe -> visible
+        self.win.txt_custom_od.setText("60")
+        self.win.cmb_geometry.setCurrentIndex(2)  # dwdi_elliptic
+        self.win.update_calculations()
+        self.assertFalse(self.win.txt_weld_width.isHidden())
+        # swsi -> hidden again
+        self.win.cmb_geometry.setCurrentIndex(1)  # swsi
+        self.win.update_calculations()
+        self.assertTrue(self.win.txt_weld_width.isHidden())
+
+    def test_dwdi_elliptical_exposures_dynamic(self):
+        self.win.cmb_geometry.setCurrentIndex(2)  # dwdi_elliptic
+        # t/De < 0.12 -> 2 exposures
+        self.win.txt_custom_od.setText("100")
+        self.win.txt_custom_t.setText("8")
+        self.win.update_calculations()
+        self.assertEqual(self.win.out_labels["req_exposures"][1].text(), "2")
+        # t/De >= 0.12 -> 3 exposures
+        self.win.txt_custom_od.setText("50")
+        self.win.txt_custom_t.setText("8")
+        self.win.update_calculations()
+        self.assertEqual(self.win.out_labels["req_exposures"][1].text(), "3")
+
+    def test_dwdi_warnings(self):
+        self.win.cmb_geometry.setCurrentIndex(2)  # dwdi_elliptic
+        self.win.txt_custom_od.setText("60")
+        self.win.txt_custom_t.setText("10")
+        self.win.txt_weld_width.setText("20")
+        self.win.update_calculations()
+        text = self.win.txt_warnings.text()
+        self.assertIn("t <= 8", text)          # t > 8 warning
+        self.assertIn("De/4", text)            # weld width > De/4 warning
+        self.assertIn("3 görüntü", text)       # t/De >= 0.12 info (t/De = 0.167)
+
     def test_geometry_override_parsing(self):
         f, b = self.win.get_geometry_override_inputs()
         self.assertIsNone(f)
@@ -193,14 +267,14 @@ class TestMainWindowInit(unittest.TestCase):
         self.win.cmb_activity_unit.setCurrentText("Ci")
         vals = self.win.get_form_values()
         # output_val should be 40.0 in Ci
-        self.assertAlmostEqual(vals[5], 40.0, places=2)
+        self.assertAlmostEqual(vals[6], 40.0, places=2)
 
         # Switch to GBq
         self.win.cmb_activity_unit.setCurrentIndex(1) # GBq
         self.assertAlmostEqual(float(self.win.txt_app_activity.text()), 1480.0, delta=1.0)
         vals_gbq = self.win.get_form_values()
         # output_val converted back to Ci for internal calculation
-        self.assertAlmostEqual(vals_gbq[5], 40.0, places=2)
+        self.assertAlmostEqual(vals_gbq[6], 40.0, places=2)
 
     def test_dynamic_output_visibility_analog_vs_digital(self):
         # Select Analog

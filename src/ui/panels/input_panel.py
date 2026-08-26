@@ -72,6 +72,13 @@ class InputPanelMixin:
         self.txt_cap.textChanged.connect(self.update_calculations)
         grp_inputs_layout.addRow(self.trans.get("cap_height"), self.txt_cap)
 
+        # Weld width (used for the DWDI elliptical weld width <= De/4 check)
+        self.lbl_weld_width = QLabel(self.trans.get("weld_width"))
+        self.txt_weld_width = QLineEdit("8.0")
+        self.txt_weld_width.setValidator(QDoubleValidator(0.0, 500.0, 1))
+        self.txt_weld_width.textChanged.connect(self.update_calculations)
+        grp_inputs_layout.addRow(self.lbl_weld_width, self.txt_weld_width)
+
         # Analog/Digital toggle
         self.bg_tech = QButtonGroup(self)
         self.rad_analog = QRadioButton(self.trans.get("analog_film"))
@@ -188,6 +195,7 @@ class InputPanelMixin:
             "lbl_custom_t": "custom_nominal_t",
             "lbl_f_source": "source_dist",
             "lbl_b_object": "object_dist",
+            "lbl_weld_width": "weld_width",
         }
         for attr, key in labels.items():
             getattr(self, attr).setText(self.trans.get(key))

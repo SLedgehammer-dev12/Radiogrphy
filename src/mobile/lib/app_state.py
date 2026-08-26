@@ -39,10 +39,12 @@ class AppState:
         self.custom_wall = None
         self.use_standard = True
         self.cap = 3.0
+        self.weld_width = 8.0
 
         self.kv = 120.0
         self.ma = 5.0
         self.exposure_time = 120.0
+        self.base_multiplier = 1.0
         self.sfd = 600.0
         self.film_class = "C5"
         self.detector_type = "cr_standard"
@@ -88,6 +90,7 @@ class AppState:
             "od": od,
             "t": wall,
             "cap": self.cap,
+            "weld_width": self.weld_width,
             "tech": self.tech,
             "source": self.source,
             "material": self.material,
@@ -100,6 +103,7 @@ class AppState:
             "bgap": self.bgap,
             "kv": self.kv,
             "output_val": output_val,
+            "base_multiplier": self.base_multiplier,
             "app_sfd": self.app_sfd,
             "app_kv": self.app_kv,
             "app_activity": self.app_activity,
@@ -175,6 +179,15 @@ class AppState:
             )
         except Exception:
             calc_time = 0.0
+        # Field correction factor (F): scales the model exposure time for
+        # field/equipment conditions deviating from model assumptions.
+        try:
+            f = float(self.base_multiplier)
+        except (TypeError, ValueError):
+            f = 1.0
+        if f <= 0.0:
+            f = 1.0
+        calc_time = calc_time * f
         try:
             target_snr = self.calc.get_target_snr(
                 vals["material"], vals["source"], vals["kv"],
@@ -191,9 +204,39 @@ class AppState:
         except Exception:
             filter_rec = ""
         try:
-            exposures = self.calc.calculate_dwsi_exposures(vals["od"], vals["t"], sfd_min)
+            geom = vals["geometry"]
+            if geom == "swsi":
+                exposures = 1
+            elif geom == "dwdi_elliptic":
+                exposures = self.calc.get_dwdi_elliptical_exposures(vals["od"], vals["t"])
+            elif geom == "dwdi_super":
+                exposures = 3
+            else:  # dwsi
+                exposures = self.calc.calculate_dwsi_exposures(vals["od"], vals["t"], sfd_min)
         except Exception:
             exposures = 0
+
+        # DWDI geometry warnings (ISO 17636-1:2022 Clauses 7.1.6/7.1.7)
+        dwdi_warnings = []
+        if vals["geometry"] in ("dwdi_elliptic", "dwdi_super"):
+            dwdi_res = self.calc.validate_dwdi(
+                vals["geometry"], vals["od"], vals["t"], vals.get("weld_width")
+            )
+            if not dwdi_res["od_ok"]:
+                dwdi_warnings.append("DWDI only valid for OD <= 100 mm")
+            if vals["geometry"] == "dwdi_elliptic":
+                if not dwdi_res["t_ok"]:
+                    dwdi_warnings.append("DWDI elliptical: t must be <= 8 mm (ISO 17636-1 7.1.6)")
+                if not dwdi_res["weld_width_ok"]:
+                    dwdi_warnings.append(f"Weld width must be <= De/4 = {vals['od'] / 4.0:.1f} mm")
+                dwdi_warnings.append(
+                    "t/De >= 0.12 -> 3 images (ISO 17636-1 7.1.6)"
+                    if dwdi_res["needs_three"] else
+                    "t/De < 0.12 -> 2 images (ISO 17636-1 7.1.6)"
+                )
+            else:
+                dwdi_warnings.append("DWDI super: 3 exposures (120°/60°) (ISO 17636-1 7.1.7)")
+        self.warnings = dwdi_warnings
 
         self.results = {
             "w_nom": w_nom,
@@ -206,8 +249,10 @@ class AppState:
             "single_wire_iqi": single_wire_iqi,
             "duplex_iqi": duplex_iqi,
             "calc_time": calc_time,
+            "base_multiplier": self.base_multiplier,
             "target_snr": target_snr,
             "req_exposures": exposures,
+            "warnings": self.warnings,
             "required_film_class": req_film,
             "filter_recommendation": filter_rec,
             "required_quality": target_snr if vals["tech"] == "digital" else 2.0,

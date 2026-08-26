@@ -75,6 +75,12 @@ class StepExposure(MDScreen):
         except ValueError:
             pass
 
+    def on_multiplier(self, text):
+        try:
+            self.state.set("base_multiplier", float(text))
+        except ValueError:
+            pass
+
     def on_sfd(self, text):
         try:
             self.state.set("sfd", float(text))

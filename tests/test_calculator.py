@@ -831,6 +831,49 @@ class TestRTCalculatorEdgeCases(unittest.TestCase):
             with self.subTest("check exposures for dwdi elliptic"):
                 pass
 
+    def test_get_dwdi_elliptical_exposures(self):
+        # t/De < 0.12 -> 2 images
+        self.assertEqual(self.calc.get_dwdi_elliptical_exposures(100.0, 8.0), 2)  # 0.08
+        self.assertEqual(self.calc.get_dwdi_elliptical_exposures(60.0, 7.0), 2)   # 0.1167
+        # t/De >= 0.12 -> 3 images
+        self.assertEqual(self.calc.get_dwdi_elliptical_exposures(50.0, 8.0), 3)   # 0.16
+        self.assertEqual(self.calc.get_dwdi_elliptical_exposures(60.0, 7.2), 3)   # 0.12 boundary
+        # guards
+        self.assertEqual(self.calc.get_dwdi_elliptical_exposures(0.0, 8.0), 2)
+        self.assertEqual(self.calc.get_dwdi_elliptical_exposures(60.0, 0.0), 2)
+        self.assertEqual(self.calc.get_dwdi_elliptical_exposures(None, 8.0), 2)
+
+    def test_validate_dwdi_elliptical(self):
+        # valid elliptical: od<=100, t<=8, weld<=De/4, t/De<0.12 -> 2
+        r = self.calc.validate_dwdi("dwdi_elliptic", 100.0, 8.0, 20.0)
+        self.assertTrue(r["valid"])
+        self.assertTrue(r["od_ok"])
+        self.assertTrue(r["t_ok"])
+        self.assertTrue(r["weld_width_ok"])
+        self.assertFalse(r["needs_three"])
+        self.assertEqual(r["exposures"], 2)
+        # t > 8 -> t_ok False
+        r = self.calc.validate_dwdi("dwdi_elliptic", 100.0, 9.0, 20.0)
+        self.assertFalse(r["valid"])
+        self.assertFalse(r["t_ok"])
+        # weld width > De/4 -> weld_width_ok False
+        r = self.calc.validate_dwdi("dwdi_elliptic", 100.0, 6.0, 30.0)
+        self.assertFalse(r["weld_width_ok"])
+        # t/De >= 0.12 -> needs_three + 3 exposures
+        r = self.calc.validate_dwdi("dwdi_elliptic", 50.0, 8.0, 10.0)
+        self.assertTrue(r["needs_three"])
+        self.assertEqual(r["exposures"], 3)
+        # od > 100 -> od_ok False
+        r = self.calc.validate_dwdi("dwdi_elliptic", 120.0, 6.0, 20.0)
+        self.assertFalse(r["od_ok"])
+
+    def test_validate_dwdi_super(self):
+        r = self.calc.validate_dwdi("dwdi_super", 60.0, 6.0, 10.0)
+        self.assertTrue(r["valid"])
+        self.assertEqual(r["exposures"], 3)
+        r = self.calc.validate_dwdi("dwdi_super", 120.0, 6.0, 10.0)
+        self.assertFalse(r["od_ok"])
+
     # --- Panel-coverage based exposures (ISO 17636-2 Annex A) ---------------
 
     def test_panel_exposures_panoramic(self):
@@ -840,7 +883,9 @@ class TestRTCalculatorEdgeCases(unittest.TestCase):
 
     def test_panel_exposures_dwdi_fixed(self):
         r = self.calc.calculate_panel_exposures(60.0, 4.0, "dwdi_elliptic", "class_b", 200.0)
-        self.assertEqual(r["n_panel"], 2)
+        self.assertEqual(r["n_panel"], 2)  # t/De = 0.067 < 0.12
+        r = self.calc.calculate_panel_exposures(50.0, 8.0, "dwdi_elliptic", "class_b", 200.0)
+        self.assertEqual(r["n_panel"], 3)  # t/De = 0.16 >= 0.12
         r = self.calc.calculate_panel_exposures(60.0, 4.0, "dwdi_super", "class_b", 200.0)
         self.assertEqual(r["n_panel"], 3)
 

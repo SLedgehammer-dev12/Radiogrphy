@@ -141,6 +141,7 @@ class MainWindow(QMainWindow,
             "txt_custom_od": "",
             "txt_custom_t": "",
             "txt_cap": "3.0",
+            "txt_weld_width": "8.0",
             "txt_d": "2.0",
             "txt_app_sfd": "600.0",
             "txt_output": "5.0",
@@ -213,7 +214,7 @@ class MainWindow(QMainWindow,
 
         # Form line edits
         line_edits = [
-            "txt_custom_od", "txt_custom_t", "txt_cap", "txt_d",
+            "txt_custom_od", "txt_custom_t", "txt_cap", "txt_weld_width", "txt_d",
             "txt_app_sfd", "txt_output", "txt_app_activity", "txt_base_e",
             "txt_panel_width", "txt_panel_height", "txt_panel_overlap",
             "txt_app_exposures", "txt_base_multiplier", "txt_f_source",
@@ -373,6 +374,7 @@ class MainWindow(QMainWindow,
         self.lbl_base_e = QLabel(self.trans.get("base_factor"))
         self.txt_base_e = QLineEdit("3.0")
         self.txt_base_e.setValidator(QDoubleValidator(0.0001, 100.0, 4))
+        self.txt_base_e.setToolTip(self.trans.get("tt_base_factor"))
         self.txt_base_e.textChanged.connect(self.update_calculations)
         grp_exposure_layout.addRow(self.lbl_base_e, self.txt_base_e)
 
@@ -800,6 +802,20 @@ class MainWindow(QMainWindow,
         self._update_output_visibility()
         self.update_calculations()
 
+    def _update_base_e(self):
+        """Refreshes the exposure chart constant (E) label, tooltip and visibility.
+
+        E is only used by the physics model; when a manufacturer chart is
+        selected the field is hidden because the chart path ignores E.
+        """
+        unit = "mA·min/m²" if self.cmb_source.currentIndex() == 0 else "Ci·min/m²"
+        self.lbl_base_e.setText(f"{self.trans.get('base_factor')} ({unit}):")
+        self.txt_base_e.setToolTip(self.trans.get("tt_base_factor"))
+        chart = self.cmb_chart_source.currentData()
+        visible = (chart == "model")
+        self.lbl_base_e.setVisible(visible)
+        self.txt_base_e.setVisible(visible)
+
     def on_source_changed(self):
         source_idx = self.cmb_source.currentIndex()
         if source_idx == 0:  # X-Ray
@@ -807,8 +823,7 @@ class MainWindow(QMainWindow,
             if not self.txt_output.text():
                 self.txt_output.setText("5.0")
             self.txt_base_e.setText("3.0")
-            if hasattr(self, 'lbl_base_e'):
-                self.lbl_base_e.setText(self.trans.get("base_factor") + " (mA·min/m²):")
+            self._update_base_e()
             if hasattr(self, 'lbl_focal_size'):
                 self.lbl_focal_size.setText(self.trans.get("focal_size"))
             
@@ -834,8 +849,7 @@ class MainWindow(QMainWindow,
             else:
                 self.txt_app_activity.setVisible(True)
 
-            if hasattr(self, 'lbl_base_e'):
-                self.lbl_base_e.setText(self.trans.get("base_factor") + " (Ci·min/m²):")
+            self._update_base_e()
             if hasattr(self, 'lbl_focal_size'):
                 self.lbl_focal_size.setText(self.trans.get("source_size_d"))
 
@@ -862,6 +876,8 @@ class MainWindow(QMainWindow,
             self.lbl_app_kv.setVisible(True)
         elif chart_source == "model":
             pass
+        # E is only meaningful in the physics model -> hide when a chart is used
+        self._update_base_e()
         self.update_calculations()
 
     def on_od_changed(self):
@@ -897,6 +913,17 @@ class MainWindow(QMainWindow,
     def on_geometry_changed(self):
         self.update_std_figure_list()
         self.update_calculations()
+
+    def _update_weld_width_visibility(self, geometry=None):
+        """Shows the weld-width input only for DWDI techniques."""
+        if not hasattr(self, 'lbl_weld_width'):
+            return
+        if geometry is None:
+            geom_keys = ["dwsi", "swsi", "dwdi_elliptic", "dwdi_super"]
+            geometry = geom_keys[self.cmb_geometry.currentIndex()]
+        visible = geometry in ["dwdi_elliptic", "dwdi_super"]
+        self.lbl_weld_width.setVisible(visible)
+        self.txt_weld_width.setVisible(visible)
 
     def update_std_figure_list(self):
         # Prevent recursion by temporarily disconnecting the signal
@@ -1052,6 +1079,7 @@ class MainWindow(QMainWindow,
         # Refresh detector type combobox labels
         for i, tkey in enumerate(self._det_trans_keys):
             self.cmb_detector_type.setItemText(i, self.trans.get(tkey))
+        self._retranslate_input_panel()
         self._retranslate_warnings_panel()
         self._retranslate_compliance_panel()
         self.sketch_box.setTitle(self.trans.get("sketch_title"))
@@ -1112,6 +1140,7 @@ class MainWindow(QMainWindow,
         self.lbl_app_activity.setText(self.trans.get("applied_activity"))
         self.lbl_base_multiplier.setText(self.trans.get("base_multiplier"))
         self.txt_base_multiplier.setToolTip(self.trans.get("tt_base_multiplier"))
+        self._update_base_e()
 
         if self.cmb_iqi_type.currentData() == "step_hole":
             self.lbl_app_wire.setText(self.trans.get("applied_step_hole"))
@@ -1186,6 +1215,7 @@ class MainWindow(QMainWindow,
             (self.txt_app_sfd, 10.0, 5000.0),
             (self.txt_d, 0.01, 20.0),
             (self.txt_cap, 0.0, 50.0),
+            (self.txt_weld_width, 0.0, 500.0),
             (self.txt_output, 0.01, 1000.0),
             (self.txt_app_time, 0.1, 100000.0),
             (self.txt_base_e, 0.0001, 100.0),
@@ -1250,6 +1280,11 @@ class MainWindow(QMainWindow,
             cap = 3.0
 
         try:
+            weld_width = float(self.txt_weld_width.text().replace(",", "."))
+        except ValueError:
+            weld_width = 8.0
+
+        try:
             d = float(self.txt_d.text().replace(",", "."))
         except ValueError:
             d = 2.0
@@ -1288,7 +1323,7 @@ class MainWindow(QMainWindow,
         # Chart source
         chart_source = self.cmb_chart_source.currentData() if hasattr(self, 'cmb_chart_source') else "model"
 
-        return od, t, cap, d, sfd, output_val, base_e, detector_type, film_class_used, chart_source
+        return od, t, cap, weld_width, d, sfd, output_val, base_e, detector_type, film_class_used, chart_source
 
     def get_applied_exposures(self):
         """
@@ -1352,7 +1387,7 @@ class MainWindow(QMainWindow,
 
     def update_calculations(self):
         # 1. Fetch values
-        od, t, cap, d, sfd, output_val, base_e, detector_type, film_class_used, chart_source = self.get_form_values()
+        od, t, cap, weld_width, d, sfd, output_val, base_e, detector_type, film_class_used, chart_source = self.get_form_values()
         
         material_keys = ["steel", "aluminum", "titanium", "copper_nickel"]
         material = material_keys[self.cmb_material.currentIndex()]
@@ -1370,6 +1405,8 @@ class MainWindow(QMainWindow,
         # 2. Geometry Constraints
         # Disable/Enable geometry combinations
         # DWDI is only active if OD <= 100 mm
+        user_geometry = geometry
+        self._update_weld_width_visibility(geometry)
         if od > 100.0:
             if geometry in ["dwdi_elliptic", "dwdi_super"]:
                 # Force to DWSI if user has selected a DWDI but diameter is too large
@@ -1431,7 +1468,7 @@ class MainWindow(QMainWindow,
         if geometry == "swsi":
             exposures = 1
         elif geometry == "dwdi_elliptic":
-            exposures = 2
+            exposures = self.calc.get_dwdi_elliptical_exposures(od, t)
         elif geometry == "dwdi_super":
             exposures = 3
         else: # DWSI
@@ -1605,6 +1642,20 @@ class MainWindow(QMainWindow,
 
         # Base exposure multiplier: scales the model time for field conditions
         base_multiplier = self.get_base_multiplier()
+        try:
+            raw_mult = float(self.txt_base_multiplier.text().strip().replace(",", "."))
+        except ValueError:
+            raw_mult = 1.0
+        if raw_mult <= 0.0:
+            if self.trans.language == "tr":
+                warnings.append("UYARI: Saha Düzeltme Çarpanı (F) geçersiz/pozitif değil; 1.0 olarak uygulandı.")
+            else:
+                warnings.append("WARNING: Field Correction Factor (F) is invalid/non-positive; 1.0 applied.")
+        elif base_multiplier < 0.5 or base_multiplier > 2.0:
+            if self.trans.language == "tr":
+                warnings.append(f"UYARI: Saha Düzeltme Çarpanı (F={base_multiplier:.2f}) olağan aralığın (0.5–2.0) dışında; değer teknik/ekipman doğrulama kaydıyla desteklenmelidir.")
+            else:
+                warnings.append(f"WARNING: Field Correction Factor (F={base_multiplier:.2f}) is outside the usual range (0.5–2.0); the value should be supported by a technique/equipment qualification record.")
         if base_multiplier != 1.0:
             raw_time = raw_time * base_multiplier
             min_calc = int(raw_time // 60)
@@ -1615,9 +1666,25 @@ class MainWindow(QMainWindow,
         if testing_class == "class_a":
             warnings.append(self.trans.get("warn_class_a"))
 
-        # DWDI diameter check
-        if od > 100.0 and geometry in ["dwdi_elliptic", "dwdi_super"]:
-            warnings.append(self.trans.get("warn_dwdi_limit"))
+        # DWDI geometry validation (ISO 17636-1:2022 Clauses 7.1.6 / 7.1.7)
+        if user_geometry in ["dwdi_elliptic", "dwdi_super"]:
+            if user_geometry != geometry:
+                # user_geometry was DWDI but geometry was forced to DWSI (OD > 100)
+                warnings.append(self.trans.get("info_dwdi_forced_swsi"))
+            dwdi_res = self.calc.validate_dwdi(user_geometry, od, t, weld_width)
+            if not dwdi_res["od_ok"]:
+                warnings.append(self.trans.get("warn_dwdi_limit"))
+            if user_geometry == "dwdi_elliptic":
+                if not dwdi_res["t_ok"]:
+                    warnings.append(self.trans.get("warn_dwdi_t_limit"))
+                if not dwdi_res["weld_width_ok"]:
+                    warnings.append(self.trans.get("warn_dwdi_weld_width", weld_width, od / 4.0))
+                if dwdi_res["needs_three"]:
+                    warnings.append(self.trans.get("info_dwdi_elliptic_3"))
+                else:
+                    warnings.append(self.trans.get("info_dwdi_elliptic_2"))
+            else:
+                warnings.append(self.trans.get("info_dwdi_super_exposures"))
 
         # Isotope on light metal check
         if source != "x_ray" and material in ["aluminum", "titanium"]:
@@ -2048,7 +2115,7 @@ class MainWindow(QMainWindow,
 
         # Source Activity Check for isotopes
         if source != "x_ray":
-            calc_activity = self.get_form_values()[5] # output_val entered in inputs
+            calc_activity = self.get_form_values()[6] # output_val entered in inputs
             diff_act = abs(applied_activity - calc_activity) / max(0.1, calc_activity)
             if diff_act > 0.15:
                 symbol = "⚠"
@@ -2072,7 +2139,7 @@ class MainWindow(QMainWindow,
             return
 
         # 2. Gather values for report
-        od, t, cap, d, sfd, output_val, base_e, detector_type, film_class_used, _chart_source = self.get_form_values()
+        od, t, cap, weld_width, d, sfd, output_val, base_e, detector_type, film_class_used, _chart_source = self.get_form_values()
         material_keys = ["steel", "aluminum", "titanium", "copper_nickel"]
         material = material_keys[self.cmb_material.currentIndex()]
         tech = "digital" if self.rad_digital.isChecked() else "analog"
@@ -2098,6 +2165,7 @@ class MainWindow(QMainWindow,
             "od": od,
             "t": t,
             "cap": cap,
+            "weld_width": weld_width,
             "d": d,
             "sfd": sfd,
             "output_val": output_val,
@@ -2107,6 +2175,7 @@ class MainWindow(QMainWindow,
             "tech_text": self.trans.get("analog_film" if tech == "analog" else "digital_cr_dda"),
             "source": source,
             "source_text": self.trans.get(source),
+            "geometry": geometry,
             "geometry_text": self.trans.get(geometry),
             "input_kv": input_kv,
             "overlap": overlap,

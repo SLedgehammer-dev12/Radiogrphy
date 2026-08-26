@@ -43,16 +43,12 @@ class RTCalculator:
     }
 
     # -----------------------------------------------------------------------
-    # Optical Density (OD) Target Correction
-    # Class A: OD >= 2.0  →  factor 1.0 (reference)
-    # Class B: OD >= 2.3  →  exposure factor = 10^((2.3-2.0) / G̅)
-    # Source: ISO 17636-1 Clause 5.3, ASTM E94 Commentary.
-    # Old fixed correction using G̅=3.0 → 1.25; now film-class-aware.
+    # Optical Density (OD) Target Correction (analog film)
+    # The OD-based exposure correction is computed in `_density_correction_factor`
+    # using the film-class-aware gradient (see FILM_GRADIENT) rather than a
+    # fixed OD_CORRECTION table. A static dict is intentionally NOT kept here
+    # to avoid a second, divergent source of truth.
     # -----------------------------------------------------------------------
-    OD_CORRECTION = {
-        "class_a": 1.00,   # target OD >= 2.0
-        "class_b": 1.25,   # default fallback when film class unknown
-    }
 
     # ISO 17636-2:2022 Table 2 — Penetrated thickness ranges per source
     # (min, max) in mm, None = no limit for that bound.
@@ -920,16 +916,34 @@ class RTCalculator:
         gradient = self.FILM_GRADIENT.get(film_class, 3.0)
         return 10.0 ** ((target_density - ref_density) / gradient)
 
+    # -----------------------------------------------------------------------
+    # Beam-hardening correction (X-ray only)
+    # As penetrated thickness increases the effective spectrum hardens, so the
+    # effective linear attenuation coefficient decreases. This is a simplified
+    # engineering model: the reduction ramps in from 10 mm and is capped at
+    # BEAM_HARDENING_MAX_REDUCTION (15 %). Values are empirical.
+    # -----------------------------------------------------------------------
+    BEAM_HARDENING_MAX_REDUCTION = 0.15   # 15% relative reduction (empirical)
+    BEAM_HARDENING_RAMP_THICKNESS = 30.0  # mm over which reduction ramps in
+
     def _apply_beam_hardening(self, mu, w, source, kv=None, material="steel"):
         if source != "x_ray":
             return mu
         if w <= 10.0:
             return mu
-        reduction = 0.15 * min(1.0, (w - 10.0) / 30.0)
+        reduction = self.BEAM_HARDENING_MAX_REDUCTION * min(
+            1.0, (w - 10.0) / self.BEAM_HARDENING_RAMP_THICKNESS
+        )
         return mu * (1.0 - reduction)
 
     def _lookup_dwsi_exposures(self, OD, t, testing_class):
         dt_ratio = OD / t if t > 0 else 999.0
+        # Simplified D/t lookup mirroring the spirit of ISO 17636-1:2022
+        # Annex A (minimum exposures for circumferential coverage). The exact
+        # thresholds here are engineering approximations of the Annex A charts,
+        # not a verbatim reproduction of a specific table row; the geometric
+        # solver in calculate_dwsi_exposures() provides the governing value and
+        # the stricter of the two is returned.
         table = {
             "class_a": [
                 (20.0, 3), (15.0, 3), (10.0, 4), (7.0, 5), (5.0, 6), (0.0, 8),
@@ -1028,6 +1042,52 @@ class RTCalculator:
 
         # Return the stricter of geometric calculation vs ISO table
         return max(geo_n, iso_min)
+
+    def get_dwdi_elliptical_exposures(self, od, t):
+        """
+        Minimum number of images for the DWDI elliptical technique.
+
+        ISO 17636-1:2022 Clause 7.1.6 (Figure 11): two 90° displaced images are
+        sufficient if t/De < 0.12; otherwise three elliptical images are needed.
+        The same technique is referenced by ISO 17636-2:2022 Clause 7.1.6.
+        """
+        try:
+            if od <= 0.0 or t <= 0.0:
+                return 2
+            return 3 if (t / od) >= 0.12 else 2
+        except (TypeError, ZeroDivisionError):
+            return 2
+
+    def validate_dwdi(self, geometry, od, t, weld_width=None):
+        """
+        Validates DWDI geometry limits per ISO 17636-1:2022 Clauses 7.1.6/7.1.7
+        (and the equivalent digital clauses in ISO 17636-2:2022).
+
+        Elliptical (Figure 11): De <= 100 mm, t <= 8 mm, weld width <= De/4.
+        Perpendicular/superimposed (Figure 12): De <= 100 mm, 3 exposures.
+
+        Returns a structured dict (booleans + exposures) so the caller can build
+        localized warning messages.
+        """
+        od_ok = od is not None and 0.0 < od <= 100.0
+        exposures = 3 if geometry == "dwdi_super" else self.get_dwdi_elliptical_exposures(od, t)
+        needs_three = False
+        t_ok = True
+        weld_width_ok = True
+        if geometry == "dwdi_elliptic":
+            t_ok = t is not None and t <= 8.0
+            if weld_width is not None:
+                weld_width_ok = weld_width <= (od / 4.0)
+            if od is not None and od > 0.0 and t is not None and t > 0.0:
+                needs_three = (t / od) >= 0.12
+        return {
+            "valid": od_ok and t_ok and weld_width_ok,
+            "od_ok": od_ok,
+            "t_ok": t_ok,
+            "weld_width_ok": weld_width_ok,
+            "exposures": exposures,
+            "needs_three": needs_three,
+        }
 
     # -----------------------------------------------------------------------
     # Flat-panel (DDA) coverage-based minimum exposures (ISO 17636-2 Annex A)
@@ -1185,7 +1245,10 @@ class RTCalculator:
         if self.is_central_projection(geometry, std_figure):
             return self._panel_result_fixed(1, od, t, cap, "panoramic", panel_height)
         if geometry == "dwdi_elliptic":
-            return self._panel_result_fixed(2, od, t, cap, "dwdi_elliptic", panel_height)
+            return self._panel_result_fixed(
+                self.get_dwdi_elliptical_exposures(od, t), od, t, cap,
+                "dwdi_elliptic", panel_height
+            )
         if geometry == "dwdi_super":
             return self._panel_result_fixed(3, od, t, cap, "dwdi_super", panel_height)
 
@@ -1337,9 +1400,10 @@ class RTCalculator:
           film_speed_factor  — from FILM_SPEED_FACTORS[film_class]  (ISO 11699-1)
                                C1 = 1.0 (slowest), C2 = 2.0, C3 = 4.0,
                                C4 = 8.0, C5 = 16.0, C6 = 32.0 (fastest)
-          OD_correction      — from OD_CORRECTION[testing_class]
+          OD_correction      — from _density_correction_factor(testing_class, film_class)
+                               (film-class-aware gradient; see FILM_GRADIENT)
                                Class A (OD ≥ 2.0) = 1.00
-                               Class B (OD ≥ 2.3) = 1.25  (25% more exposure for deeper OD)
+                               Class B (OD ≥ 2.3) = 10^((2.3-2.0)/G̅)
 
         ── DIGITAL DETECTOR CORRECTION ────────────────────────────────────────
         t_digital = t_base × SNR_correction / detector_type_factor
@@ -1607,6 +1671,11 @@ class RTCalculator:
         Determines linear attenuation coefficient (mu) using log-log interpolation based on
         kV and material type (Steel, Aluminum, Titanium, Copper/Nickel).
         Clamps values outside the range of [80, 400] kV.
+
+        Reference data: mass/narrow-beam attenuation coefficients from NIST
+        XCOM / NISTIR 5632 and ICRU Report 44 (compiled into the tables below).
+        Values are engineering approximations for a typical broad-beam NDT setup
+        and are intended for exposure-time estimation, not metrology.
         """
         data = {
             "steel": [
@@ -1751,12 +1820,22 @@ class RTCalculator:
         # Isotope check
         material_limits = self.get_source_thickness_limits(source, material)
         if material_limits is None:
-            return True, None, None, ""
+            # Source + material combination not covered by Table 2 at all
+            source_name = source.replace("isotope_", "").upper()
+            return True, None, None, (
+                f"{source_name} + {material} is not defined in ISO 17636-2 Table 2; "
+                "applicability should be confirmed with the contracting parties."
+            )
 
         class_limits = material_limits.get(testing_class, None)
         if class_limits is None:
-            # Source+material+class combination not defined in Table 2
-            return True, None, None, ""
+            # Source + material defined, but not for this testing class
+            source_name = source.replace("isotope_", "").upper()
+            return True, None, None, (
+                f"{source_name} + {material} is not defined for "
+                f"{testing_class.replace('_', ' ').title()} in ISO 17636-2 Table 2; "
+                "applicability should be confirmed with the contracting parties."
+            )
 
         min_w, max_w = class_limits
         is_valid = True

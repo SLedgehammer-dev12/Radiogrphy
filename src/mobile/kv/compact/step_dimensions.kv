@@ -61,6 +61,16 @@
             size_hint_y: None
             height: dp(48)
 
+        MDTextField:
+            id: weld_width
+            hint_text: "Kaynak Genişliği (mm)"
+            text: str(app.state.weld_width)
+            input_filter: "float"
+            on_text: root.on_weld_width(self.text)
+            size_hint_x: 1
+            size_hint_y: None
+            height: dp(48)
+
         Widget:
             size_hint_y: 1
 

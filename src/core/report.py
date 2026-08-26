@@ -182,6 +182,24 @@ class PDFReportGenerator:
                 Paragraph("", label_style),
                 Paragraph("", value_style)
             ])
+
+        # Exposure chart constant (E) — only meaningful for the physics model
+        e_unit = "mA·min/m²" if inputs.get("source") == "x_ray" else "Ci·min/m²"
+        inputs_data.append([
+            Paragraph(lang_obj.get("base_factor"), label_style),
+            Paragraph(f"{inputs.get('base_e', 3.0):.4f} {e_unit}", value_style),
+            Paragraph("", label_style),
+            Paragraph("", value_style)
+        ])
+
+        # Weld width (DWDI techniques) — used for the De/4 geometry check
+        if inputs.get("geometry") in ("dwdi_elliptic", "dwdi_super"):
+            inputs_data.append([
+                Paragraph(lang_obj.get("weld_width"), label_style),
+                Paragraph(f"{inputs.get('weld_width', 8.0):.1f} mm", value_style),
+                Paragraph("", label_style),
+                Paragraph("", value_style)
+            ])
         
         inputs_table = Table(inputs_data, colWidths=[140, 110, 140, 110])
         inputs_table.setStyle(TableStyle([
@@ -243,6 +261,18 @@ class PDFReportGenerator:
         ]))
         story.append(outputs_table)
         story.append(Spacer(1, 15))
+
+        # Field Correction Factor (F) context note (only when it deviates from 1.0)
+        if outputs.get("base_multiplier", 1.0) != 1.0:
+            note_style = ParagraphStyle(
+                name='BaseMultiplierNote',
+                fontName=self._resolve_font('Arial-Oblique'),
+                fontSize=8,
+                leading=11,
+                textColor=colors.HexColor('#616161'),
+            )
+            story.append(Paragraph(lang_obj.get("base_multiplier_note"), note_style))
+            story.append(Spacer(1, 8))
 
         # Section 3: Level 3 Overrides (If active)
         if lvl3_active:
@@ -385,7 +415,10 @@ class PDFReportGenerator:
         if inputs.get("tech") == "digital":
             ref_rows.append([Paragraph("Duplex Wire IQI Target", ref_style), Paragraph("ISO 19232-5 & ISO 17636-2 Clause 6.6 Table 3 (basic unsharpness / duplex)", ref_style)])
             ref_rows.append([Paragraph("Target SNR_N", ref_style), Paragraph("ISO 17636-2 Clause 6.8 (Class A SNR_N >= 70, Class B SNR_N >= 130)", ref_style)])
+            ref_rows.append([Paragraph("SNR_N Measurement Location", ref_style), Paragraph("ISO 17636-2 Clause 7.3.1 (non-flush weld: target SNR_N x 1.4 when measured adjacent)", ref_style)])
             ref_rows.append([Paragraph("Detector Basic Resolution (SRb)", ref_style), Paragraph("ISO 17636-2 Tables B.1 & B.2 (Maximum allowed basic spatial resolution)", ref_style)])
+            ref_rows.append([Paragraph("Compensation Principles (CP I/II)", ref_style), Paragraph("ISO 17636-2 Clause 5.2 (reduce contrast -> increase SNR; distance compensation)", ref_style)])
+            ref_rows.append([Paragraph("Panel Coverage Exposures", ref_style), Paragraph("ISO 17636-2 Clauses 7.6/7.8 & Annex A (flat-panel DDA coverage of circumference)", ref_style)])
         else:
             ref_rows.append([Paragraph("Optical Density Target (D)", ref_style), Paragraph("ISO 17636-1 Clause 5.3 (Class A density >= 2.0, Class B >= 2.3)", ref_style)])
             ref_rows.append([Paragraph("Film System Class", ref_style), Paragraph("ISO 17636-1 Table 2 (Required minimum film system class)", ref_style)])
