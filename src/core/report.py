@@ -144,9 +144,10 @@ class PDFReportGenerator:
 
     @staticmethod
     def _make_qr_image(inputs, outputs):
-        """Builds a PIL QR image of the verification payload, or None if the
-        optional `qrcode` package is unavailable."""
+        """Builds a PNG file-like object of the verification QR code, or None
+        if the optional `qrcode` package is unavailable."""
         try:
+            import io
             import qrcode
             from qrcode.constants import ERROR_CORRECT_M
             from qrcode.image.pil import PilImage
@@ -156,7 +157,11 @@ class PDFReportGenerator:
             qr.add_data(payload)
             qr.make(fit=True)
             img = qr.make_image(fill_color="black", back_color="white", image_factory=PilImage)
-            return img.resize((120, 120))
+            img = img.resize((120, 120))
+            buf = io.BytesIO()
+            img.save(buf, format="PNG")
+            buf.seek(0)
+            return buf
         except Exception:
             return None
 
