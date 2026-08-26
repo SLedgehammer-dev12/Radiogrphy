@@ -1,6 +1,6 @@
 # Changelog
 
-## [Unreleased] - Roadmap: ASME/ASTM, radiation safety, ISO 5817, report identity
+## [1.5.0] - 2026-08-26
 
 ### Added
 - Inspection standard selector (ISO 17636 / ASME Sec V Art 2):
