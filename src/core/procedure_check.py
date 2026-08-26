@@ -272,8 +272,8 @@ class ProcedureComplianceChecker:
         # 8. Geometric Unsharpness Check
         ug = calculated.get("ug", 0.0)
         if ug > 0.0:
-            # Simple threshold: Ug > 0.5mm is considered excessive
-            max_ug = 0.5
+            # Threshold: ISO simplified 0.5 mm or ASME Sec V Art 2 limit
+            max_ug = calculated.get("ug_limit", 0.5)
             if ug <= max_ug:
                 checks.append({"name": "ug", "status": True, "details": l_msgs["ug_pass"].format(ug)})
             else:

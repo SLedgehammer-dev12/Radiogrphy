@@ -1491,6 +1491,9 @@ class RTCalculator:
                 "isotope_ir192": 0.035,   # Iridium-192  (0.37 MeV avg)
                 "isotope_se75":  0.055,   # Selenium-75  (0.27 MeV avg)
                 "isotope_co60":  0.022,   # Cobalt-60    (1.25 MeV avg)
+                # Low-energy isotopes (approximate broad-beam effective values):
+                "isotope_yb169": 0.115,   # Ytterbium-169 (0.13 MeV avg)
+                "isotope_tm170": 0.30,    # Thulium-170   (0.084 MeV avg)
             }
             mu = MU.get(source, 0.035)
 
@@ -1779,6 +1782,166 @@ class RTCalculator:
             "pb_screen": pb_screen,
             "metal_filter": metal_filter
         }
+
+    # -----------------------------------------------------------------------
+    # ASME Section V Article 2 / ASTM — geometric unsharpness (Ug) limits
+    # ASME V Art.2, Table T-274 (max Ug vs material thickness):
+    #   t < 50 mm        -> Ug <= 0.51 mm
+    #   50 <= t <= 75 mm -> Ug <= 0.76 mm
+    #   75 < t <= 100 mm -> Ug <= 1.02 mm
+    #   t > 100 mm       -> Ug <= 1.78 mm
+    # -----------------------------------------------------------------------
+    def get_asme_ug_limit(self, t):
+        """Returns the maximum allowed geometric unsharpness (mm) for a material
+        thickness t (mm) per ASME Section V Article 2, T-274.2 (inch-based):
+        t <= 2 in (50.8 mm) -> 0.51 mm; <= 3 in (76.2 mm) -> 0.76 mm;
+        <= 4 in (101.6 mm) -> 1.02 mm; > 4 in -> 1.78 mm."""
+        if t is None or t <= 0.0:
+            return 0.51
+        if t <= 50.8:
+            return 0.51
+        if t <= 76.2:
+            return 0.76
+        if t <= 101.6:
+            return 1.02
+        return 1.78
+
+    def check_ug_compliance(self, ug, t, standard="iso"):
+        """
+        Checks geometric unsharpness against the active standard.
+        - ISO (default): simplified 0.5 mm threshold (existing behaviour).
+        - ASME Sec V Art 2: thickness-based Ug limits.
+        Returns (is_ok, max_ug_mm).
+        """
+        if standard == "asme":
+            limit = self.get_asme_ug_limit(t)
+        else:
+            limit = 0.5
+        return (ug <= limit), limit
+
+    # -----------------------------------------------------------------------
+    # Radiographic Equivalence Factors (REF) relative to steel
+    # ISO 17636-1 Annex E / ASTM E94. Equivalent steel thickness:
+    #   t_steel_equiv = t_material * REF
+    # The program's physics model uses material-specific attenuation (mu),
+    # so REF here is informational / for reporting & cross-referencing.
+    # -----------------------------------------------------------------------
+    REF_FACTORS = {
+        "steel": 1.0,
+        "copper_nickel": 1.4,   # copper / copper-nickel
+        "titanium": 0.54,
+        "aluminum": 0.18,
+    }
+
+    def get_ref_factor(self, material):
+        return self.REF_FACTORS.get(material, 1.0)
+
+    def equivalent_steel_thickness(self, t, material):
+        """Returns the steel-equivalent penetrated thickness t*REF (mm)."""
+        return float(t) * self.get_ref_factor(material)
+
+    # -----------------------------------------------------------------------
+    # ASTM IQI determination (ASME Sec V Art 2 / ASTM E1025, E747)
+    # Approximations: 2-2T hole-type sensitivity and 2 % wire sensitivity,
+    # used when the ASME standard is selected.
+    # -----------------------------------------------------------------------
+    def get_astm_iqi_hole(self, t):
+        """
+        ASTM E1025 hole-type IQI requirement (2-2T essential hole).
+        Required IQI thickness T = t/2; the hole to identify has diameter 2T.
+        Returns dict with designator, plate thickness (mm) and hole diameter.
+        """
+        t = max(float(t), 0.1)
+        iqi_t = t / 2.0            # plate thickness T for 2-2T
+        hole_dia = 2.0 * iqi_t     # = t
+        return {
+            "designator": "2-2T",
+            "iqi_t_mm": iqi_t,
+            "hole_dia_mm": hole_dia,
+        }
+
+    # ASTM E747 wire set ranges by penetrated thickness (inches) and wire
+    # diameters (mm) per E747 wire-number table (approx., 2 % sensitivity).
+    E747_WIRE_DIA_MM = {1: 3.20, 2: 2.50, 3: 2.00, 4: 1.60, 5: 1.25, 6: 1.00,
+                        7: 0.80, 8: 0.63, 9: 0.50, 10: 0.40, 11: 0.32, 12: 0.25,
+                        13: 0.20, 14: 0.16, 15: 0.125, 16: 0.10, 17: 0.08, 18: 0.063}
+
+    def get_astm_iqi_wire(self, t):
+        """
+        ASTM E747 wire-type IQI requirement (2 % sensitivity).
+        Required wire diameter ~ 2 % of penetrated thickness; E747 wire set
+        chosen by thickness range. Returns dict with set, wire number, diameter.
+        """
+        t = max(float(t), 0.1)
+        req_dia = 0.02 * t
+        # Nearest wire number whose diameter >= required (fine <= coarse)
+        wire = min(
+            (n for n, d in self.E747_WIRE_DIA_MM.items() if d >= req_dia),
+            default=18,
+        )
+        if t <= 6.35:        # 0.25 in -> Set A
+            wset = "A"
+        elif t <= 19.05:     # 0.75 in -> Set B
+            wset = "B"
+        elif t <= 50.8:      # 2.0 in -> Set C
+            wset = "C"
+        else:                # Set D
+            wset = "D"
+        return {
+            "set": wset,
+            "wire_no": wire,
+            "wire_dia_mm": self.E747_WIRE_DIA_MM.get(wire, 0.0),
+        }
+
+    # -----------------------------------------------------------------------
+    # Radiation safety — controlled / supervised area barrier distance
+    # Dose-rate model:  D(R) = (Gamma * A) / R^2   [mSv/h when Gamma in
+    # (mSv*m^2)/(h*GBq)-equivalent; here we use the classic gamma constants in
+    # R*m^2/(h*Ci) and convert to dose rate at R metres].
+    # Reference dose limits (common NDT practice):
+    #   Controlled area  : 20 µSv/h (and 2.5 µSv/h for some regulations)
+    #   Supervised area  : 7.5 µSv/h
+    # Collimator attenuation applied as a number of half-value layers (HVL).
+    # -----------------------------------------------------------------------
+    # Gamma constants [R*m^2/(h*Ci)] — used for barrier distance.
+    GAMMA_RM2_H_CI = {
+        "isotope_ir192": 0.48,
+        "isotope_se75": 0.203,
+        "isotope_co60": 1.30,
+        "isotope_yb169": 0.125,
+        "isotope_tm170": 0.003,
+    }
+    # Approximate effective half-value layers [mm of lead] for collimator/shield.
+    COLLIMATOR_HVL_MM_LEAD = {
+        "isotope_ir192": 2.8,
+        "isotope_se75": 1.2,
+        "isotope_co60": 12.0,
+        "isotope_yb169": 0.5,
+        "isotope_tm170": 0.08,
+    }
+
+    def calculate_barrier_distance(self, source, activity_ci, limit_usvh=20.0,
+                                   hvl_layers=0.0, hvls_per_cm=None):
+        """
+        Calculates the safe barrier distance R (m) such that the dose rate at R
+        does not exceed `limit_usvh` µSv/h.
+
+        Dose-rate at R metres (no shield):  D[µSv/h] = (Gamma * A[Ci] / R^2) * 8697
+        where 1 R/h = 8697 µSv/h. With a collimator providing `hvl_layers`
+        half-value layers of attenuation, the dose rate is divided by 2^layers.
+
+        Returns (distance_m, dose_rate_at_1m_usvh, shielding_reduction).
+        """
+        gamma = self.GAMMA_RM2_H_CI.get(source, 0.48)
+        if activity_ci is None or activity_ci <= 0.0:
+            return 0.0, 0.0, 1.0
+        base = gamma * float(activity_ci) * 8697.0  # µSv/h at 1 m, unshielded
+        reduction = 2.0 ** hvl_layers
+        shielded = base / reduction
+        if shielded <= 0.0:
+            return 0.0, 0.0, reduction
+        r = (shielded / limit_usvh) ** 0.5
+        return r, base, reduction
 
     def get_source_thickness_limits(self, source, material):
         """

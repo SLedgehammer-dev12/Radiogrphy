@@ -1,6 +1,7 @@
 # -*- coding: utf-8 -*-
 
 import os
+import json
 import tempfile
 from datetime import datetime
 from PyQt6.QtWidgets import (QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QGridLayout, 
@@ -51,6 +52,7 @@ class MainWindow(QMainWindow,
 
         # State variables
         self.is_dark_theme = True
+        self.use_inch = False
         self.lvl3_settings = {
             "sfd_comp": False,
             "voltage_override": False,
@@ -130,6 +132,8 @@ class MainWindow(QMainWindow,
             "cmb_film_class_used": None,
             "cmb_detector_type": None,
             "cmb_chart_source": None,
+            "cmb_standard": None,
+            "cmb_collimator": None,
         }
         for combo_name in combo_map:
             w = getattr(self, combo_name, None)
@@ -147,6 +151,15 @@ class MainWindow(QMainWindow,
             "txt_output": "5.0",
             "txt_app_activity": "40.0",
             "txt_base_e": "3.0",
+            "txt_barrier_limit": "20.0",
+            "txt_report_no": "",
+            "txt_project": "",
+            "txt_welder_id": "",
+            "txt_wps_pqr": "",
+            "txt_procedure_no": "",
+            "txt_device_serial": "",
+            "txt_calibration_date": "",
+            "txt_personnel": "",
             "txt_panel_width": "200.0",
             "txt_panel_height": "200.0",
             "txt_panel_overlap": "",
@@ -202,6 +215,7 @@ class MainWindow(QMainWindow,
             "cmb_material", "cmb_source", "cmb_class", "cmb_od",
             "cmb_t", "cmb_geometry", "cmb_film_class_used",
             "cmb_detector_type", "cmb_chart_source",
+            "cmb_standard", "cmb_collimator",
         ]
         for combo_name in combo_map:
             idx = s.value(f"form/{combo_name}", type=int)
@@ -216,6 +230,9 @@ class MainWindow(QMainWindow,
         line_edits = [
             "txt_custom_od", "txt_custom_t", "txt_cap", "txt_weld_width", "txt_d",
             "txt_app_sfd", "txt_output", "txt_app_activity", "txt_base_e",
+            "txt_barrier_limit",
+            "txt_report_no", "txt_project", "txt_welder_id", "txt_wps_pqr",
+            "txt_procedure_no", "txt_device_serial", "txt_calibration_date", "txt_personnel",
             "txt_panel_width", "txt_panel_height", "txt_panel_overlap",
             "txt_app_exposures", "txt_base_multiplier", "txt_f_source",
             "txt_b_object",
@@ -251,6 +268,12 @@ class MainWindow(QMainWindow,
         self.btn_theme.setFixedWidth(120)
         self.btn_theme.clicked.connect(self.toggle_theme)
 
+        # Units toggle (metric / imperial) for the main dimensional inputs
+        self.btn_units = QPushButton("mm")
+        self.btn_units.setFixedWidth(50)
+        self.btn_units.setToolTip("mm ↔ inç / inch")
+        self.btn_units.clicked.connect(self.toggle_units)
+
         # Level 3 Exception Button
         self.btn_lvl3 = QPushButton(self.trans.get("level3_section"))
         self.btn_lvl3.clicked.connect(self.open_level3_dialog)
@@ -267,6 +290,7 @@ class MainWindow(QMainWindow,
         top_bar.addStretch()
         top_bar.addWidget(self.btn_lang)
         top_bar.addWidget(self.btn_theme)
+        top_bar.addWidget(self.btn_units)
         top_bar.addWidget(self.btn_lvl3)
         top_bar.addWidget(self.btn_export)
         main_layout.addLayout(top_bar)
@@ -373,10 +397,29 @@ class MainWindow(QMainWindow,
         # Base factor E
         self.lbl_base_e = QLabel(self.trans.get("base_factor"))
         self.txt_base_e = QLineEdit("3.0")
-        self.txt_base_e.setValidator(QDoubleValidator(0.0001, 100.0, 4))
+        self.txt_base_e.setValidator(QDoubleValidator(0.0001, 2000.0, 4))
         self.txt_base_e.setToolTip(self.trans.get("tt_base_factor"))
         self.txt_base_e.textChanged.connect(self.update_calculations)
         grp_exposure_layout.addRow(self.lbl_base_e, self.txt_base_e)
+
+        # Collimator / shielding (barrier distance) - isotopes only
+        self.lbl_collimator = QLabel(self.trans.get("collimator"))
+        self.cmb_collimator = QComboBox()
+        self.cmb_collimator.addItem(self.trans.get("collimator_none"), 0)
+        self.cmb_collimator.addItem("1 HVL", 1)
+        self.cmb_collimator.addItem("2 HVL", 2)
+        self.cmb_collimator.addItem("4 HVL", 4)
+        self.cmb_collimator.setToolTip(self.trans.get("tt_collimator"))
+        self.cmb_collimator.currentIndexChanged.connect(self.update_calculations)
+        grp_exposure_layout.addRow(self.lbl_collimator, self.cmb_collimator)
+
+        # Controlled-area dose limit
+        self.lbl_barrier_limit = QLabel(self.trans.get("barrier_limit_label"))
+        self.txt_barrier_limit = QLineEdit("20.0")
+        self.txt_barrier_limit.setValidator(QDoubleValidator(0.1, 1000.0, 1))
+        self.txt_barrier_limit.setToolTip(self.trans.get("tt_barrier_distance"))
+        self.txt_barrier_limit.textChanged.connect(self.update_calculations)
+        grp_exposure_layout.addRow(self.lbl_barrier_limit, self.txt_barrier_limit)
 
         # Chart Source
         self.cmb_chart_source = QComboBox()
@@ -502,6 +545,30 @@ class MainWindow(QMainWindow,
         # (note: this is a duplicate concept from txt_app_overlap above — kept for clarity)
 
         scroll_layout_2.addWidget(self.grp_exposure)
+
+        # Report / Procedure information group
+        self.grp_report_info = QGroupBox(self.trans.get("report_info_section"))
+        grp_report_layout = QFormLayout_custom()
+        self.grp_report_info.setLayout(grp_report_layout)
+        self._report_fields = [
+            ("txt_report_no", "report_no", ""),
+            ("txt_project", "project", ""),
+            ("txt_welder_id", "welder_id", ""),
+            ("txt_wps_pqr", "wps_pqr", ""),
+            ("txt_procedure_no", "procedure_no", ""),
+            ("txt_device_serial", "device_serial", ""),
+            ("txt_calibration_date", "calibration_date", ""),
+            ("txt_personnel", "personnel", ""),
+        ]
+        self._report_labels = {}
+        for attr, key, default in self._report_fields:
+            lbl = QLabel(self.trans.get(key))
+            edit = QLineEdit(default)
+            edit.textChanged.connect(self.update_calculations)
+            grp_report_layout.addRow(lbl, edit)
+            setattr(self, attr, edit)
+            self._report_labels[attr] = lbl
+        scroll_layout_2.addWidget(self.grp_report_info)
         self.left_scroll_2.setWidget(scroll_widget_2)
 
         self.left_splitter.addWidget(self.left_scroll_1)
@@ -530,8 +597,8 @@ class MainWindow(QMainWindow,
             "w_nom", "w_eff", "u_max", "f_min", "sfd_min",
             "ug", "req_exposures", "exposures_panel", "exposures_applied", "exposures_check",
             "single_wire_iqi", "duplex_iqi",
-            "quality_target", "calc_time", "detector_quality",
-            "filter_recommendation"
+            "asme_iqi", "quality_target", "calc_time", "detector_quality",
+            "barrier_distance", "filter_recommendation"
         ]
 
         for name in out_fields:
@@ -728,6 +795,15 @@ class MainWindow(QMainWindow,
             dq_name = "detector_quality" if is_digital else "film_class_req"
             self.out_labels["detector_quality"][0].setText(self.trans.get(dq_name))
 
+        # asme_iqi only when ASME Sec V Art 2 standard is selected
+        standard = self.cmb_standard.currentData() if hasattr(self, "cmb_standard") else "iso"
+        if "asme_iqi" in self.out_rows:
+            self.out_rows["asme_iqi"].setVisible(standard == "asme")
+
+        # barrier_distance only for isotopes
+        if "barrier_distance" in self.out_rows:
+            self.out_rows["barrier_distance"].setVisible(not is_xray)
+
     def on_tech_changed(self):
         is_digital = self.rad_digital.isChecked()
 
@@ -837,6 +913,11 @@ class MainWindow(QMainWindow,
                 self.act_widget.setVisible(False)
             else:
                 self.txt_app_activity.setVisible(False)
+            if hasattr(self, 'lbl_collimator'):
+                self.lbl_collimator.setVisible(False)
+                self.cmb_collimator.setVisible(False)
+                self.lbl_barrier_limit.setVisible(False)
+                self.txt_barrier_limit.setVisible(False)
         else: # Isotopes
             # Hide Amperage & Voltage, Show Activity
             self.lbl_output.setVisible(False)
@@ -848,6 +929,12 @@ class MainWindow(QMainWindow,
                 self.act_widget.setVisible(True)
             else:
                 self.txt_app_activity.setVisible(True)
+
+            if hasattr(self, 'lbl_collimator'):
+                self.lbl_collimator.setVisible(True)
+                self.cmb_collimator.setVisible(True)
+                self.lbl_barrier_limit.setVisible(True)
+                self.txt_barrier_limit.setVisible(True)
 
             self._update_base_e()
             if hasattr(self, 'lbl_focal_size'):
@@ -862,8 +949,12 @@ class MainWindow(QMainWindow,
                 self.txt_base_e.setText("30.0")
             elif source_idx == 2:  # Se-75
                 self.txt_base_e.setText("40.0")
-            else:                  # Co-60
+            elif source_idx == 3:  # Co-60
                 self.txt_base_e.setText("20.0")
+            elif source_idx == 4:  # Yb-169
+                self.txt_base_e.setText("150.0")
+            else:                  # Tm-170
+                self.txt_base_e.setText("500.0")
 
         self.update_calculations()
 
@@ -1042,7 +1133,9 @@ class MainWindow(QMainWindow,
             self.trans.get("x_ray"),
             self.trans.get("isotope_ir192"),
             self.trans.get("isotope_se75"),
-            self.trans.get("isotope_co60")
+            self.trans.get("isotope_co60"),
+            self.trans.get("isotope_yb169"),
+            self.trans.get("isotope_tm170"),
         ])
         self.cmb_source.setCurrentIndex(source_idx)
 
@@ -1133,6 +1226,10 @@ class MainWindow(QMainWindow,
         # Update QGroupBox titles for exposure section
         self.grp_exposure.setTitle(self.trans.get("applied_exposure_section"))
         self.grp_compliance.setTitle(self.trans.get("procedure_section"))
+        if hasattr(self, "grp_report_info"):
+            self.grp_report_info.setTitle(self.trans.get("report_info_section"))
+            for attr, key, _ in self._report_fields:
+                self._report_labels[attr].setText(self.trans.get(key))
 
         self.lbl_app_sfd.setText(self.trans.get("applied_sfd"))
         self.lbl_app_time.setText(self.trans.get("applied_time"))
@@ -1141,6 +1238,21 @@ class MainWindow(QMainWindow,
         self.lbl_base_multiplier.setText(self.trans.get("base_multiplier"))
         self.txt_base_multiplier.setToolTip(self.trans.get("tt_base_multiplier"))
         self._update_base_e()
+
+        # Standard selector retranslation
+        if hasattr(self, "cmb_standard"):
+            std_idx = self.cmb_standard.currentIndex()
+            self.cmb_standard.blockSignals(True)
+            self.cmb_standard.clear()
+            self.cmb_standard.addItem(self.trans.get("standard_iso"), "iso")
+            self.cmb_standard.addItem(self.trans.get("standard_asme"), "asme")
+            self.cmb_standard.setCurrentIndex(std_idx)
+            self.cmb_standard.blockSignals(False)
+
+        # Collimator / barrier limit labels
+        if hasattr(self, "lbl_collimator"):
+            self.lbl_collimator.setText(self.trans.get("collimator"))
+            self.lbl_barrier_limit.setText(self.trans.get("barrier_limit_label"))
 
         if self.cmb_iqi_type.currentData() == "step_hole":
             self.lbl_app_wire.setText(self.trans.get("applied_step_hole"))
@@ -1181,6 +1293,35 @@ class MainWindow(QMainWindow,
         self.on_std_figure_changed()
         self.update_calculations()
 
+    # Main dimensional inputs that participate in the mm <-> inch toggle.
+    _MM_FIELDS = [
+        "txt_custom_od", "txt_custom_t", "txt_cap", "txt_weld_width",
+        "txt_d", "txt_app_sfd",
+    ]
+
+    def _to_mm(self, value):
+        """Converts a value to mm when the inch unit mode is active."""
+        return value * 25.4 if self.use_inch else value
+
+    def toggle_units(self):
+        """Switches the displayed unit of the main dimensional inputs."""
+        self.use_inch = not self.use_inch
+        # mm -> in: /25.4 ; in -> mm: *25.4
+        factor = (1.0 / 25.4) if self.use_inch else 25.4
+        for attr in self._MM_FIELDS:
+            w = getattr(self, attr, None)
+            if w is None:
+                continue
+            try:
+                val = float(w.text().strip().replace(",", "."))
+            except ValueError:
+                continue
+            w.blockSignals(True)
+            w.setText(f"{val * factor:.2f}")
+            w.blockSignals(False)
+        self.btn_units.setText("inç" if self.use_inch else "mm")
+        self.update_calculations()
+
     def open_level3_dialog(self):
         dlg = Level3Dialog(self.trans, self, is_dark=self.is_dark_theme)
         dlg.set_settings(self.lvl3_settings)
@@ -1218,7 +1359,8 @@ class MainWindow(QMainWindow,
             (self.txt_weld_width, 0.0, 500.0),
             (self.txt_output, 0.01, 1000.0),
             (self.txt_app_time, 0.1, 100000.0),
-            (self.txt_base_e, 0.0001, 100.0),
+            (self.txt_base_e, 0.0001, 2000.0),
+            (self.txt_barrier_limit, 0.1, 1000.0),
             (self.txt_app_overlap, 0.0, 500.0),
             (self.txt_app_srb, 1.0, 1000.0),
             (self.txt_app_quality, 0.01, 10000.0),
@@ -1323,7 +1465,9 @@ class MainWindow(QMainWindow,
         # Chart source
         chart_source = self.cmb_chart_source.currentData() if hasattr(self, 'cmb_chart_source') else "model"
 
-        return od, t, cap, weld_width, d, sfd, output_val, base_e, detector_type, film_class_used, chart_source
+        return (self._to_mm(od), self._to_mm(t), self._to_mm(cap), self._to_mm(weld_width),
+            self._to_mm(d), self._to_mm(sfd), output_val, base_e,
+            detector_type, film_class_used, chart_source)
 
     def get_applied_exposures(self):
         """
@@ -1385,6 +1529,141 @@ class MainWindow(QMainWindow,
             return 1.0
         return min(val, 100.0)
 
+    def get_report_info(self):
+        """Returns the report/procedure header fields as a dict."""
+        info = {}
+        for attr, key, _ in self._report_fields:
+            w = getattr(self, attr, None)
+            info[key] = w.text().strip() if w else ""
+        return info
+
+    # --- Presets / project data management ---------------------------------
+
+    _PRESET_COMBOS = [
+        "cmb_material", "cmb_source", "cmb_class", "cmb_od", "cmb_t",
+        "cmb_geometry", "cmb_film_class_used", "cmb_detector_type",
+        "cmb_chart_source", "cmb_standard", "cmb_collimator", "cmb_iqi_type",
+        "cmb_snr_location", "cmb_app_duplex", "cmb_app_wire",
+        "cmb_activity_unit", "cmb_std_figure",
+    ]
+    _PRESET_EDITS = [
+        "txt_custom_od", "txt_custom_t", "txt_cap", "txt_weld_width", "txt_d",
+        "txt_app_sfd", "txt_output", "txt_app_activity", "txt_base_e",
+        "txt_barrier_limit", "txt_report_no", "txt_project", "txt_welder_id",
+        "txt_wps_pqr", "txt_procedure_no", "txt_device_serial",
+        "txt_calibration_date", "txt_personnel", "txt_panel_width",
+        "txt_panel_height", "txt_panel_overlap", "txt_app_exposures",
+        "txt_base_multiplier", "txt_f_source", "txt_b_object", "txt_app_kv",
+        "txt_app_time", "txt_app_overlap", "txt_app_srb", "txt_app_quality",
+        "txt_dd", "txt_bed", "txt_bgap",
+    ]
+
+    def collect_form_state(self):
+        """Serializes the current form state into a JSON-friendly dict."""
+        state = {
+            "language": self.trans.language,
+            "rad_analog": self.rad_analog.isChecked(),
+            "rad_digital": self.rad_digital.isChecked(),
+            "rad_detector_flat": self.rad_detector_flat.isChecked(),
+            "rad_detector_curved": self.rad_detector_curved.isChecked(),
+            "chk_source_side_iqi": self.chk_source_side_iqi.isChecked(),
+        }
+        for attr in self._PRESET_COMBOS:
+            w = getattr(self, attr, None)
+            if w is not None:
+                state[attr] = w.currentIndex()
+        for attr in self._PRESET_EDITS:
+            w = getattr(self, attr, None)
+            if w is not None:
+                state[attr] = w.text()
+        return state
+
+    def apply_form_state(self, state):
+        """Restores widget values from a collected state dict."""
+        if not isinstance(state, dict):
+            return
+        if "language" in state and state["language"] in ("tr", "en"):
+            self.trans.set_language(state["language"])
+        for attr in self._PRESET_COMBOS:
+            w = getattr(self, attr, None)
+            idx = state.get(attr)
+            if w is not None and isinstance(idx, int) and 0 <= idx < w.count():
+                w.blockSignals(True)
+                w.setCurrentIndex(idx)
+                w.blockSignals(False)
+        for attr in self._PRESET_EDITS:
+            w = getattr(self, attr, None)
+            if w is not None and attr in state:
+                w.setText(str(state[attr]))
+        if "rad_analog" in state:
+            self.rad_analog.setChecked(bool(state["rad_analog"]))
+        if "rad_detector_flat" in state:
+            self.rad_detector_flat.setChecked(bool(state["rad_detector_flat"]))
+        if "chk_source_side_iqi" in state:
+            self.chk_source_side_iqi.setChecked(bool(state["chk_source_side_iqi"]))
+        self.retranslate_ui()
+        self.update_calculations()
+
+    def save_form_preset(self):
+        filepath, _ = QFileDialog.getSaveFileName(self, "Save Preset", "rt_preset.json", "JSON Files (*.json)")
+        if not filepath:
+            return
+        try:
+            with open(filepath, "w", encoding="utf-8") as f:
+                json.dump({"type": "radiography_preset", "version": CURRENT_VERSION,
+                           "state": self.collect_form_state()}, f, ensure_ascii=False, indent=2)
+            QMessageBox.information(self, "Success", f"Preset saved: {filepath}")
+        except Exception as e:
+            QMessageBox.critical(self, "Error", f"Could not save preset: {e}")
+
+    def load_form_preset(self):
+        filepath, _ = QFileDialog.getOpenFileName(self, "Load Preset", "", "JSON Files (*.json)")
+        if not filepath:
+            return
+        try:
+            with open(filepath, "r", encoding="utf-8") as f:
+                data = json.load(f)
+            if data.get("type") != "radiography_preset":
+                QMessageBox.warning(self, "Warning", "Not a valid Radiography preset file.")
+                return
+            self.apply_form_state(data.get("state", {}))
+            QMessageBox.information(self, "Success", f"Preset loaded: {filepath}")
+        except Exception as e:
+            QMessageBox.critical(self, "Error", f"Could not load preset: {e}")
+
+    def export_project_json(self):
+        filepath, _ = QFileDialog.getSaveFileName(self, "Export Project", "rt_project.json", "JSON Files (*.json)")
+        if not filepath:
+            return
+        try:
+            payload = {
+                "type": "radiography_project",
+                "version": CURRENT_VERSION,
+                "state": self.collect_form_state(),
+                "calculated": self.last_calculated,
+                "warnings": self.txt_warnings.text(),
+            }
+            with open(filepath, "w", encoding="utf-8") as f:
+                json.dump(payload, f, ensure_ascii=False, indent=2)
+            QMessageBox.information(self, "Success", f"Project exported: {filepath}")
+        except Exception as e:
+            QMessageBox.critical(self, "Error", f"Could not export project: {e}")
+
+    def import_project_json(self):
+        filepath, _ = QFileDialog.getOpenFileName(self, "Import Project", "", "JSON Files (*.json)")
+        if not filepath:
+            return
+        try:
+            with open(filepath, "r", encoding="utf-8") as f:
+                data = json.load(f)
+            if data.get("type") != "radiography_project":
+                QMessageBox.warning(self, "Warning", "Not a valid Radiography project file.")
+                return
+            self.apply_form_state(data.get("state", {}))
+            QMessageBox.information(self, "Success", f"Project imported: {filepath}")
+        except Exception as e:
+            QMessageBox.critical(self, "Error", f"Could not import project: {e}")
+
     def update_calculations(self):
         # 1. Fetch values
         od, t, cap, weld_width, d, sfd, output_val, base_e, detector_type, film_class_used, chart_source = self.get_form_values()
@@ -1394,7 +1673,7 @@ class MainWindow(QMainWindow,
 
         tech = "digital" if self.rad_digital.isChecked() else "analog"
         
-        source_keys = ["x_ray", "isotope_ir192", "isotope_se75", "isotope_co60"]
+        source_keys = ["x_ray", "isotope_ir192", "isotope_se75", "isotope_co60", "isotope_yb169", "isotope_tm170"]
         source = source_keys[self.cmb_source.currentIndex()]
 
         testing_class = "class_b" if self.cmb_class.currentIndex() == 0 else "class_a"
@@ -1463,6 +1742,17 @@ class MainWindow(QMainWindow,
         f_min_star, ci_factor = self.calc.calculate_f_min_star(d, b_dist, t, testing_class)
         if f_min_star is not None and f_min_star > f_min:
             f_min = f_min_star
+
+        # Inspection standard (ISO 17636 / ASME Sec V Art 2)
+        standard = self.cmb_standard.currentData() if hasattr(self, "cmb_standard") else "iso"
+
+        # ASME Sec V Art 2 geometric unsharpness (Ug) limit check
+        ug_ok, ug_limit = self.calc.check_ug_compliance(ug, t, standard)
+        if standard == "asme" and not ug_ok:
+            if self.trans.language == "tr":
+                warnings.append(f"UYARI (ASME Sec V Art 2): Ug ({ug:.3f} mm) izin verilen limiti ({ug_limit:.2f} mm) aşıyor. Kaynak-nesne mesafesi (f) artırılmalı.")
+            else:
+                warnings.append(f"WARNING (ASME Sec V Art 2): Ug ({ug:.3f} mm) exceeds the allowed limit ({ug_limit:.2f} mm). Increase source-to-object distance (f).")
 
         # Exposures
         if geometry == "swsi":
@@ -1690,6 +1980,15 @@ class MainWindow(QMainWindow,
         if source != "x_ray" and material in ["aluminum", "titanium"]:
             warnings.append(self.trans.get("warn_isotope_light_metal"))
 
+        # Radiographic equivalence factor (informational, non-steel materials)
+        if material != "steel":
+            ref = self.calc.get_ref_factor(material)
+            t_steel = self.calc.equivalent_steel_thickness(w_nom, material)
+            if self.trans.language == "tr":
+                warnings.append(f"BİLGİ (REF): {self.trans.get(material)} radyografik eşdeğerlik faktörü REF={ref:.2f}; eşdeğer çelik kalınlığı ≈ {t_steel:.2f} mm.")
+            else:
+                warnings.append(f"INFO (REF): {self.trans.get(material)} radiographic equivalence factor REF={ref:.2f}; equivalent steel thickness ≈ {t_steel:.2f} mm.")
+
         # b < 1.2t rule: warn when effective b is adjusted
         if b_rule_applied:
             if self.trans.language == "tr":
@@ -1910,6 +2209,41 @@ class MainWindow(QMainWindow,
         self.out_labels["calc_time"][1].setText(f"{min_calc} min {sec_calc} sec{chart_label}")
         self.out_labels["detector_quality"][1].setText(detector_quality_str)
 
+        # ASME/ASTM IQI output (ASME Sec V Art 2 only)
+        if standard == "asme":
+            if iqi_type == "step_hole":
+                hole = self.calc.get_astm_iqi_hole(t)
+                asme_iqi_str = f"{hole['designator']} (T={hole['iqi_t_mm']:.2f} mm, delik ∅={hole['hole_dia_mm']:.2f} mm) [ASTM E1025]"
+            else:
+                wire = self.calc.get_astm_iqi_wire(w_nom)
+                asme_iqi_str = f"Set {wire['set']} W{wire['wire_no']} ({wire['wire_dia_mm']:.3f} mm) [ASTM E747]"
+        else:
+            asme_iqi_str = "N/A"
+        self.out_labels["asme_iqi"][1].setText(asme_iqi_str)
+
+        # Radiation barrier distance (isotopes only)
+        if source != "x_ray":
+            hvl_layers = float(self.cmb_collimator.currentData() or 0.0)
+            try:
+                limit_usvh = float(self.txt_barrier_limit.text().replace(",", "."))
+            except ValueError:
+                limit_usvh = 20.0
+            r_controlled, dose_1m, reduction = self.calc.calculate_barrier_distance(
+                source, output_val, limit_usvh=limit_usvh, hvl_layers=hvl_layers
+            )
+            r_supervised, _, _ = self.calc.calculate_barrier_distance(
+                source, output_val, limit_usvh=7.5, hvl_layers=hvl_layers
+            )
+            if self.trans.language == "tr":
+                barrier_str = f"Kontrollü ({limit_usvh:.0f} µSv/h): {r_controlled:.1f} m | Gözetimli (7.5): {r_supervised:.1f} m"
+            else:
+                barrier_str = f"Controlled ({limit_usvh:.0f} µSv/h): {r_controlled:.1f} m | Supervised (7.5): {r_supervised:.1f} m"
+        else:
+            barrier_str = "N/A"
+            hvl_layers = 0.0
+            limit_usvh = 20.0
+        self.out_labels["barrier_distance"][1].setText(barrier_str)
+
         self._update_output_visibility()
 
         # Filter recommendation output
@@ -1934,6 +2268,12 @@ class MainWindow(QMainWindow,
             "sfd_min": sfd_min,
             "sdd_min": sdd_min,
             "ug": ug,
+            "ug_limit": ug_limit,
+            "standard": standard,
+            "asme_iqi": asme_iqi_str,
+            "barrier_distance": barrier_str,
+            "collimator_hvl": hvl_layers,
+            "barrier_limit_usvh": limit_usvh,
             "f_min": f_min,
             "b_dist": b_dist,
             "b_eff": b_eff,
@@ -1966,7 +2306,13 @@ class MainWindow(QMainWindow,
             self.lbl_dynamic_standard_ref.setText(f"{self.trans.get('standard_fig')} {self.cmb_std_figure.currentText()}")
 
         # Update weld sketch canvas
-        self.canvas.draw_setup(od, t, cap, geometry, sfd, self.trans, self.is_dark_theme)
+        if tech == "digital":
+            panel_w, panel_h, overlap_pct, _ = self.get_panel_inputs()
+            self.canvas.draw_setup(od, t, cap, geometry, sfd, self.trans, self.is_dark_theme,
+                                   panel_width=panel_w, panel_height=panel_h,
+                                   overlap_pct=overlap_pct, n_panel=n_panel)
+        else:
+            self.canvas.draw_setup(od, t, cap, geometry, sfd, self.trans, self.is_dark_theme)
 
         # Automatically check compliance
         self.check_procedure_compliance()
@@ -1994,6 +2340,14 @@ class MainWindow(QMainWindow,
             accum = 0.0
 
         is_accepted, reason = self.api_eval.evaluate(defect_type, t, length, width, accum, self.trans.language)
+        # Route to ISO 5817 when that standard is selected
+        defect_standard = self.cmb_defect_standard.currentData()
+        if defect_standard == "iso5817":
+            from src.core.iso5817 import ISO5817Evaluator
+            level = self.cmb_quality_level.currentText()
+            is_accepted, reason = ISO5817Evaluator().evaluate(
+                defect_type, t, length, width, accum, level=level, lang=self.trans.language
+            )
 
         if is_accepted:
             self.lbl_defect_result.setText(self.trans.get("result_accept"))
@@ -2052,7 +2406,7 @@ class MainWindow(QMainWindow,
 
         # Build dictionaries for checker
         tech = "digital" if self.rad_digital.isChecked() else "analog"
-        source_keys = ["x_ray", "isotope_ir192", "isotope_se75", "isotope_co60"]
+        source_keys = ["x_ray", "isotope_ir192", "isotope_se75", "isotope_co60", "isotope_yb169", "isotope_tm170"]
         source = source_keys[self.cmb_source.currentIndex()]
         testing_class = "class_b" if self.cmb_class.currentIndex() == 0 else "class_a"
         geom_keys = ["dwsi", "swsi", "dwdi_elliptic", "dwdi_super"]
@@ -2143,7 +2497,7 @@ class MainWindow(QMainWindow,
         material_keys = ["steel", "aluminum", "titanium", "copper_nickel"]
         material = material_keys[self.cmb_material.currentIndex()]
         tech = "digital" if self.rad_digital.isChecked() else "analog"
-        source_keys = ["x_ray", "isotope_ir192", "isotope_se75", "isotope_co60"]
+        source_keys = ["x_ray", "isotope_ir192", "isotope_se75", "isotope_co60", "isotope_yb169", "isotope_tm170"]
         source = source_keys[self.cmb_source.currentIndex()]
         testing_class = "class_b" if self.cmb_class.currentIndex() == 0 else "class_a"
         geom_keys = ["dwsi", "swsi", "dwdi_elliptic", "dwdi_super"]
@@ -2177,6 +2531,8 @@ class MainWindow(QMainWindow,
             "source_text": self.trans.get(source),
             "geometry": geometry,
             "geometry_text": self.trans.get(geometry),
+            "standard": self.cmb_standard.currentData() if hasattr(self, "cmb_standard") else "iso",
+            "report_info": self.get_report_info(),
             "input_kv": input_kv,
             "overlap": overlap,
             "iqi_type": self.cmb_iqi_type.currentData(),
@@ -2245,6 +2601,8 @@ class MainWindow(QMainWindow,
             "exposures_check": self.last_calculated.get("exposures_ok"),
             "single_wire_iqi": wire_str,
             "duplex_iqi": duplex_str if tech == "digital" else "N/A",
+            "asme_iqi": self.last_calculated.get("asme_iqi", "N/A"),
+            "barrier_distance": self.last_calculated.get("barrier_distance", "N/A"),
             "quality_target": target_quality,
             "calc_time": calc_time,
             "base_multiplier": self.last_calculated.get("base_multiplier", 1.0),
@@ -2346,17 +2704,39 @@ class MainWindow(QMainWindow,
         self.check_update_action.triggered.connect(lambda: self.check_for_updates(silent=False))
         self.update_menu.addAction(self.check_update_action)
 
+        data_menu = menu_bar.addMenu("&Data")
+        act_save_preset = QAction("Save Preset (Şablon)", self)
+        act_save_preset.triggered.connect(self.save_form_preset)
+        data_menu.addAction(act_save_preset)
+        act_load_preset = QAction("Load Preset (Şablon)", self)
+        act_load_preset.triggered.connect(self.load_form_preset)
+        data_menu.addAction(act_load_preset)
+        data_menu.addSeparator()
+        act_export = QAction("Export Project (JSON)", self)
+        act_export.triggered.connect(self.export_project_json)
+        data_menu.addAction(act_export)
+        act_import = QAction("Import Project (JSON)", self)
+        act_import.triggered.connect(self.import_project_json)
+        data_menu.addAction(act_import)
+
         help_menu = menu_bar.addMenu("&Help")
         about_action = QAction(f"About Radiography v{CURRENT_VERSION}", self)
         about_action.triggered.connect(self._show_about)
         help_menu.addAction(about_action)
 
     def _show_about(self):
-        QMessageBox.about(self, "About Radiography",
-                          f"Radiographic Testing (RT) Exposure Calculator\n"
-                          f"Version: {CURRENT_VERSION}\n"
-                          f"ISO 17636 / API 1104 Compliant\n\n"
-                          f"© 2026 Radiography")
+        QMessageBox.about(
+            self,
+            "About Radiography",
+            f"Radiographic Testing (RT) Exposure Calculator\n"
+            f"Version: {CURRENT_VERSION}\n"
+            f"ISO 17636 / API 1104 Compliant\n\n"
+            f"{self.trans.get('app_owner')}\n\n"
+            f"{self.trans.get('disclaimer')}\n\n"
+            f"{self.trans.get('contact_title')}:\n"
+            f"{self.trans.get('contact_github')}\n"
+            f"{self.trans.get('contact_email')}",
+        )
 
     def check_for_updates(self, silent=True):
         self.check_update_action.setEnabled(False)

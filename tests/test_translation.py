@@ -150,6 +150,16 @@ class TestTranslationContent(unittest.TestCase):
         self.assertIn("base_multiplier_note", self.trans.translations["tr"])
         self.assertIn("base_multiplier_note", self.trans.translations["en"])
 
+    def test_owner_contact_disclaimer_keys(self):
+        for lang in ("tr", "en"):
+            d = self.trans.translations[lang]
+            for key in ("app_owner", "disclaimer", "contact_title", "contact_github", "contact_email"):
+                self.assertIn(key, d, f"Missing '{key}' in {lang}")
+                self.assertNotEqual(d[key].strip(), "")
+        self.assertIn("ÖMER ERBAŞ", self.trans.translations["tr"]["app_owner"])
+        self.assertIn("omer.erbas@botas.gov.tr", self.trans.translations["tr"]["contact_email"])
+        self.assertIn("ÖMER ERBAŞ", self.trans.translations["en"]["app_owner"])
+
 
 if __name__ == "__main__":
     unittest.main()

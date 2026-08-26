@@ -163,6 +163,7 @@ class TestMainWindowInit(unittest.TestCase):
         self.assertTrue(self.win.txt_weld_width.isHidden())
 
     def test_dwdi_elliptical_exposures_dynamic(self):
+        self.win.txt_custom_od.setText("60")   # small -> avoids OD>100 DWDI force
         self.win.cmb_geometry.setCurrentIndex(2)  # dwdi_elliptic
         # t/De < 0.12 -> 2 exposures
         self.win.txt_custom_od.setText("100")
@@ -185,6 +186,53 @@ class TestMainWindowInit(unittest.TestCase):
         self.assertIn("t <= 8", text)          # t > 8 warning
         self.assertIn("De/4", text)            # weld width > De/4 warning
         self.assertIn("3 görüntü", text)       # t/De >= 0.12 info (t/De = 0.167)
+
+    def test_standard_selector_and_asme_iqi(self):
+        self.assertTrue(hasattr(self.win, "cmb_standard"))
+        # ASME Sec V Art 2 -> ASTM E747 wire IQI output (default IQI type = wire)
+        self.win.cmb_standard.setCurrentIndex(1)
+        self.win.update_calculations()
+        text = self.win.out_labels["asme_iqi"][1].text()
+        self.assertNotEqual(text, "N/A")
+        self.assertIn("E747", text)
+        # back to ISO -> N/A
+        self.win.cmb_standard.setCurrentIndex(0)
+        self.win.update_calculations()
+        self.assertEqual(self.win.out_labels["asme_iqi"][1].text(), "N/A")
+
+    def test_barrier_distance_output(self):
+        self.win.cmb_source.setCurrentIndex(1)  # Ir-192
+        self.win.txt_app_activity.setText("40.0")
+        self.win.update_calculations()
+        text = self.win.out_labels["barrier_distance"][1].text()
+        self.assertIn("Kontrollü", text)
+        self.assertIn("Gözetimli", text)
+        # X-Ray -> N/A (no gamma barrier)
+        self.win.cmb_source.setCurrentIndex(0)
+        self.win.update_calculations()
+        self.assertEqual(self.win.out_labels["barrier_distance"][1].text(), "N/A")
+
+    def test_preset_roundtrip(self):
+        self.win.txt_custom_od.setText("60.0")
+        self.win.cmb_geometry.setCurrentIndex(2)  # dwdi_elliptic
+        self.win.txt_report_no.setText("RT-2026-001")
+        state = self.win.collect_form_state()
+        self.win.txt_custom_od.setText("114.3")
+        self.win.apply_form_state(state)
+        self.assertEqual(self.win.txt_custom_od.text(), "60.0")
+        self.assertEqual(self.win.txt_report_no.text(), "RT-2026-001")
+
+    def test_units_toggle(self):
+        self.win.txt_custom_od.setText("114.3")
+        self.assertAlmostEqual(self.win.get_form_values()[0], 114.3)
+        self.win.toggle_units()  # -> inch
+        self.assertEqual(self.win.btn_units.text(), "inç")
+        self.assertAlmostEqual(float(self.win.txt_custom_od.text()), 114.3 / 25.4, places=2)
+        self.assertAlmostEqual(self.win.get_form_values()[0], 114.3)  # internal value in mm
+        self.win.toggle_units()  # -> back to mm
+        self.assertEqual(self.win.btn_units.text(), "mm")
+        self.assertAlmostEqual(float(self.win.txt_custom_od.text()), 114.3, places=2)
+        self.assertAlmostEqual(self.win.get_form_values()[0], 114.3)
 
     def test_geometry_override_parsing(self):
         f, b = self.win.get_geometry_override_inputs()

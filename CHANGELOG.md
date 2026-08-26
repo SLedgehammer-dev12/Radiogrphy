@@ -1,5 +1,29 @@
 # Changelog
 
+## [Unreleased] - Roadmap: ASME/ASTM, radiation safety, ISO 5817, report identity
+
+### Added
+- Inspection standard selector (ISO 17636 / ASME Sec V Art 2):
+  - ASME T-274.2 geometric unsharpness limits (0.51/0.76/1.02/1.78 mm) and compliance check
+  - ASTM E1025 (2-2T hole) and E747 (wire, 2% sensitivity) IQI requirements
+- Radiation safety barrier distance (NDK/TAEK & IAEA practice):
+  - Dose-rate model D(R)=Γ·A/R² with collimator/shielding HVL selection
+  - Controlled (20 µSv/h) and supervised (7.5 µSv/h) area distances in results and PDF
+- Extended isotope library: Yb-169 and Tm-170 (mu, HVL, gamma, exposure defaults, Table 2 already defined)
+- Radiographic Equivalence Factors (REF) for steel/copper/titanium/aluminum (informational)
+- Official NDT report header fields (Report No, Project/Client, Welder ID, WPS/PQR, Procedure No, Device Serial, Calibration Date, Personnel/Cert) rendered in the PDF
+- Verification QR code in the PDF report (optional `qrcode` package)
+- Preset (template) save/load and full project JSON export/import via the Data menu
+- ISO 5817 quality-level defect evaluation (levels B/C/D) with a defect-standard selector in the module
+- Metric/imperial (mm ↔ inch) toggle for the main dimensional inputs
+- DWDI elliptical schematic: source offset and 10-15° beam-angle annotations; flat-panel DDA coverage overlay with the minimum 10 mm overlap band
+- Turkish-character-safe PDF fonts: bundled real Noto Sans TTFs with Arial-first, Noto Sans fallback (WinAnsi Helvetica cannot render Ğ/İ/ş/ı)
+- Report identity: owner (ÖMER ERBAŞ), liability disclaimer, and contact channels (GitHub Issues + email) in About and PDF
+
+### Fixed
+- Mobile PDF used WinAnsi Helvetica (broken Turkish chars); the bundled Noto Sans were invalid HTML files — replaced with real static TTFs and wired into the font resolution chain
+- `pdf_helper.py` reported `tech_text` from geometry instead of the RT technology
+
 ## [1.4.1] - 2026-08-25
 
 ### Added

@@ -21,7 +21,8 @@ class WeldSketchCanvas(FigureCanvas):
         self.fig.patch.set_facecolor('#1e1e2e') # Sleek dark mode facecolor by default
         self.axes.set_facecolor('#1e1e2e')
 
-    def draw_setup(self, OD, t, cap, geometry, sfd, lang_obj, is_dark=True):
+    def draw_setup(self, OD, t, cap, geometry, sfd, lang_obj, is_dark=True,
+                   panel_width=None, panel_height=None, overlap_pct=10.0, n_panel=None):
         self.axes.clear()
         
         # Detect background color preference based on theme
@@ -103,8 +104,9 @@ class WeldSketchCanvas(FigureCanvas):
             y_s = sfd - R
             # Offset source to create elliptical projection of top weld
             xs_offset = R * 0.4
+            angle_deg = 15.0  # typical elliptical projection beam angle
             self.axes.plot(xs_offset, y_s, marker='o', color=source_color, markersize=10, label=lang_obj.get("source"))
-            
+
             # Detector at bottom (centered around -xs_offset)
             detector_arc = patches.Arc((-xs_offset*0.5, 0), R*2.08, R*2.08, theta1=200, theta2=340, color=det_color, linewidth=4, label=lang_obj.get("detector"))
             self.axes.add_patch(detector_arc)
@@ -120,6 +122,16 @@ class WeldSketchCanvas(FigureCanvas):
 
             beam_poly = patches.Polygon([[xs_offset, y_s], [det_x1, det_y1], [det_x2, det_y2]], facecolor=beam_color, alpha=0.1)
             self.axes.add_patch(beam_poly)
+
+            # Dimension annotations: source offset and elliptical beam angle
+            self.axes.annotate('', xy=(0, y_s), xytext=(xs_offset, y_s),
+                               arrowprops=dict(arrowstyle='<->', color=text_color, lw=1))
+            self.axes.text(xs_offset / 2.0, y_s + R * 0.18,
+                           f"{lang_obj.get('source_offset')}: {xs_offset:.0f} mm",
+                           color=text_color, fontsize=8, ha='center')
+            self.axes.text(xs_offset + R * 0.08, y_s - R * 0.12,
+                           f"{lang_obj.get('beam_angle')} α ≈ {angle_deg:.0f}°",
+                           color=text_color, fontsize=8)
             
         elif geometry == "dwdi_super":
             # DWDI Superimposed: Source straight outside, detector straight opposite
@@ -142,10 +154,32 @@ class WeldSketchCanvas(FigureCanvas):
             beam_poly = patches.Polygon([[0, y_s], [det_x1, det_y1], [det_x2, det_y2]], facecolor=beam_color, alpha=0.1)
             self.axes.add_patch(beam_poly)
 
+        # Flat-panel DDA coverage overlay (digital mode, when panel width is provided)
+        if panel_width is not None:
+            pw = max(10.0, float(panel_width))
+            panel_half = pw / 2.0
+            y_panel = -R - R * 0.15
+            self.axes.plot([-panel_half, panel_half], [y_panel, y_panel],
+                           color=det_color, linewidth=6, solid_capstyle='butt',
+                           label=lang_obj.get("dda_label"))
+            ov = max(10.0, (overlap_pct or 10.0) / 100.0 * pw)
+            self.axes.plot([panel_half - ov, panel_half], [y_panel, y_panel],
+                           color=weld_color, linewidth=6, solid_capstyle='butt')
+            self.axes.text(panel_half - ov / 2.0, y_panel + R * 0.12,
+                           f"{lang_obj.get('overlap_short')} {ov:.0f} mm",
+                           color=text_color, fontsize=7, ha='center')
+            self.axes.text(0, y_panel - R * 0.18,
+                           f"DDA {pw:.0f} mm", color=text_color, fontsize=7, ha='center')
+            # Extend limits so the panel remains visible
+            self.axes.set_xlim(min(-R * 1.5, -panel_half * 1.1),
+                               max(R * 1.5, panel_half * 1.1))
+            self.axes.set_ylim(-R - R * 0.45, max(R * 1.5, y_s + R * 0.5) if geometry != "swsi" else R * 1.5)
+
         # Dynamic Zoom & Limits
         padding = R * 1.5 if geometry != "swsi" else R * 0.5
-        self.axes.set_xlim(-R - padding, R + padding)
-        self.axes.set_ylim(-R - padding, max(R + padding, sfd - R + padding) if geometry != "swsi" else R + padding)
+        if panel_width is None:
+            self.axes.set_xlim(-R - padding, R + padding)
+            self.axes.set_ylim(-R - padding, max(R + padding, sfd - R + padding) if geometry != "swsi" else R + padding)
         
         # Legend (neat, modern style)
         self.axes.legend(loc='upper right', framealpha=0.1, facecolor=bg_color, edgecolor=text_color, labelcolor=text_color, fontsize=8)

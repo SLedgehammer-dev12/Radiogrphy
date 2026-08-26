@@ -1013,6 +1013,85 @@ class TestRTCalculatorEdgeCases(unittest.TestCase):
         t2 = db.calculate_exposure_time_rfactor(sfd=600.0, w=15.0, source="isotope_ir192", activity=40.0, film_key="AA400")
         self.assertAlmostEqual(t1, t2 * 2.0, places=3)
 
+    # --- Faz 2: ASME Sec V Art 2 / ASTM / radiation safety -------------------
+
+    def test_asme_ug_limits(self):
+        # ASME V T-274.2 inch-based boundaries: 2/3/4 in = 50.8/76.2/101.6 mm
+        self.assertEqual(self.calc.get_asme_ug_limit(30.0), 0.51)
+        self.assertEqual(self.calc.get_asme_ug_limit(50.8), 0.51)
+        self.assertEqual(self.calc.get_asme_ug_limit(51.0), 0.76)
+        self.assertEqual(self.calc.get_asme_ug_limit(60.0), 0.76)
+        self.assertEqual(self.calc.get_asme_ug_limit(76.2), 0.76)
+        self.assertEqual(self.calc.get_asme_ug_limit(76.3), 1.02)
+        self.assertEqual(self.calc.get_asme_ug_limit(100.0), 1.02)
+        self.assertEqual(self.calc.get_asme_ug_limit(101.6), 1.02)
+        self.assertEqual(self.calc.get_asme_ug_limit(102.0), 1.78)
+        self.assertEqual(self.calc.get_asme_ug_limit(200.0), 1.78)
+
+    def test_check_ug_compliance(self):
+        # ISO: 0.5 mm threshold
+        self.assertTrue(self.calc.check_ug_compliance(0.4, 60.0, "iso")[0])
+        self.assertFalse(self.calc.check_ug_compliance(0.6, 60.0, "iso")[0])
+        # ASME: thickness-based
+        ok, limit = self.calc.check_ug_compliance(0.6, 60.0, "asme")
+        self.assertEqual(limit, 0.76)
+        self.assertTrue(ok)
+        ok, limit = self.calc.check_ug_compliance(0.8, 60.0, "asme")
+        self.assertEqual(limit, 0.76)
+        self.assertFalse(ok)
+        ok, limit = self.calc.check_ug_compliance(1.0, 90.0, "asme")
+        self.assertEqual(limit, 1.02)
+        self.assertTrue(ok)
+
+    def test_astm_iqi_hole(self):
+        r = self.calc.get_astm_iqi_hole(10.0)
+        self.assertEqual(r["designator"], "2-2T")
+        self.assertAlmostEqual(r["iqi_t_mm"], 5.0)
+        self.assertAlmostEqual(r["hole_dia_mm"], 10.0)
+
+    def test_astm_iqi_wire(self):
+        # Thin: set A; required wire diameter ~ 2% of thickness
+        r = self.calc.get_astm_iqi_wire(5.0)
+        self.assertEqual(r["set"], "A")
+        self.assertGreaterEqual(r["wire_dia_mm"], 0.02 * 5.0)
+        # Thick: set D
+        r = self.calc.get_astm_iqi_wire(60.0)
+        self.assertEqual(r["set"], "D")
+        self.assertGreaterEqual(r["wire_dia_mm"], 0.02 * 60.0)
+
+    def test_barrier_distance(self):
+        # Ir-192, 20 Ci, controlled 20 uSv/h, unshielded
+        r, base, red = self.calc.calculate_barrier_distance("isotope_ir192", 20.0, limit_usvh=20.0, hvl_layers=0.0)
+        # base = 0.48 * 20 * 8697 uSv/h at 1 m
+        self.assertAlmostEqual(base, 0.48 * 20 * 8697.0, places=0)
+        # R such that base / R^2 = 20 -> R = sqrt(base/20)
+        expected = (base / 20.0) ** 0.5
+        self.assertAlmostEqual(r, expected, places=3)
+        # Collimator: 2 HVL halves the dose -> distance reduced
+        r2, _, _ = self.calc.calculate_barrier_distance("isotope_ir192", 20.0, limit_usvh=20.0, hvl_layers=2.0)
+        self.assertLess(r2, r)
+        self.assertAlmostEqual(r2, r / 2.0, places=3)
+        # No activity -> 0
+        r0, _, _ = self.calc.calculate_barrier_distance("isotope_ir192", 0.0)
+        self.assertEqual(r0, 0.0)
+
+    def test_low_energy_isotope_exposure(self):
+        # Yb-169 / Tm-170 exposure time computes (physics model, no crash)
+        for src in ("isotope_yb169", "isotope_tm170"):
+            min1, sec1, total = self.calc.calculate_exposure_time(
+                sfd=600.0, w_eff=10.0, source=src, output_val=40.0,
+                base_factor=150.0 if src == "isotope_yb169" else 500.0,
+                tech="analog", film_class="C5"
+            )
+            self.assertGreater(total, 0.0)
+
+    def test_ref_factors(self):
+        self.assertEqual(self.calc.get_ref_factor("steel"), 1.0)
+        self.assertAlmostEqual(self.calc.get_ref_factor("aluminum"), 0.18)
+        self.assertAlmostEqual(self.calc.get_ref_factor("titanium"), 0.54)
+        self.assertAlmostEqual(self.calc.get_ref_factor("copper_nickel"), 1.4)
+        self.assertAlmostEqual(self.calc.equivalent_steel_thickness(10.0, "aluminum"), 1.8)
+
 if __name__ == "__main__":
     unittest.main()
 

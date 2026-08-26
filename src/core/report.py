@@ -2,6 +2,7 @@
 
 import logging
 import os
+import sys
 from datetime import datetime
 from reportlab.lib.pagesizes import letter
 from reportlab.lib import colors
@@ -30,13 +31,32 @@ class PDFReportGenerator:
         "Arial-Oblique": "Helvetica-Oblique",
     }
 
+    # Bundled TrueType fonts (full Unicode incl. Turkish) used as a portable
+    # fallback when the system Arial faces are unavailable. Embedding a TTF also
+    # makes the PDF self-contained (renders correctly on any viewer).
+    _BUNDLED_FONTS = [
+        ("NotoSans", "NotoSans-Regular.ttf"),
+        ("NotoSans-Bold", "NotoSans-Bold.ttf"),
+        ("NotoSans-Italic", "NotoSans-Italic.ttf"),
+    ]
+
+    @staticmethod
+    def _bundled_font_dir():
+        """Absolute directory of the bundled Noto Sans fonts (frozen-safe)."""
+        try:
+            base = sys._MEIPASS
+        except AttributeError:
+            base = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
+        return os.path.join(base, "src", "mobile", "assets", "fonts")
+
     @staticmethod
     def _register_fonts():
         import platform
+
         system = platform.system()
-        font_candidates = []
+        arial_candidates = []
         if system == "Darwin":
-            font_candidates = [
+            arial_candidates = [
                 ("Arial", "/System/Library/Fonts/Supplemental/Arial.ttf"),
                 ("Arial-Bold", "/System/Library/Fonts/Supplemental/Arial Bold.ttf"),
                 ("Arial-Italic", "/System/Library/Fonts/Supplemental/Arial Italic.ttf"),
@@ -44,23 +64,101 @@ class PDFReportGenerator:
             ]
         elif system == "Windows":
             win_dir = os.environ.get("WINDIR", "C:\\Windows")
-            font_candidates = [
+            arial_candidates = [
                 ("Arial", os.path.join(win_dir, "Fonts", "arial.ttf")),
                 ("Arial-Bold", os.path.join(win_dir, "Fonts", "arialbd.ttf")),
                 ("Arial-Italic", os.path.join(win_dir, "Fonts", "ariali.ttf")),
                 ("Arial-BoldItalic", os.path.join(win_dir, "Fonts", "arialbi.ttf")),
             ]
-        for name, path in font_candidates:
+
+        registered_arial = 0
+        for name, path in arial_candidates:
             if os.path.exists(path):
                 try:
                     pdfmetrics.registerFont(TTFont(name, path))
                     PDFReportGenerator._FONT_MAP[name] = name
+                    registered_arial += 1
                 except Exception:
                     pass
+        if registered_arial == 4:
+            try:
+                pdfmetrics.registerFontFamily(
+                    "Arial", normal="Arial", bold="Arial-Bold",
+                    italic="Arial-Italic", boldItalic="Arial-BoldItalic",
+                )
+            except Exception:
+                pass
+
+        # Register the bundled Noto Sans faces (portable fallback).
+        noto_dir = PDFReportGenerator._bundled_font_dir()
+        registered_noto = 0
+        for name, filename in PDFReportGenerator._BUNDLED_FONTS:
+            path = os.path.join(noto_dir, filename)
+            if os.path.exists(path):
+                try:
+                    pdfmetrics.registerFont(TTFont(name, path))
+                    registered_noto += 1
+                except Exception:
+                    pass
+
+        # Prefer Arial only when all its faces are present; otherwise use the
+        # bundled Noto Sans so Turkish/Unicode text always renders correctly.
+        if registered_arial < 4 and registered_noto >= 3:
+            PDFReportGenerator._FONT_MAP.update({
+                "Arial": "NotoSans",
+                "Arial-Bold": "NotoSans-Bold",
+                "Arial-Italic": "NotoSans-Italic",
+                "Arial-BoldItalic": "NotoSans-Bold",
+                "Arial-Oblique": "NotoSans-Italic",
+            })
+            try:
+                pdfmetrics.registerFontFamily(
+                    "NotoSans", normal="NotoSans", bold="NotoSans-Bold",
+                    italic="NotoSans-Italic", boldItalic="NotoSans-Bold",
+                )
+            except Exception:
+                pass
 
     @staticmethod
     def _resolve_font(name):
         return PDFReportGenerator._FONT_MAP.get(name, PDFReportGenerator._ARIAL_FALLBACK)
+
+    @staticmethod
+    def _build_qr_payload(inputs, outputs):
+        """Compact verification payload embedded in the QR code (with hash)."""
+        import hashlib
+        parts = [
+            "RT-Report",
+            (inputs.get("report_info") or {}).get("report_no", ""),
+            inputs.get("material_text", ""),
+            f"t={inputs.get('t', 0)}",
+            f"OD={inputs.get('od', 0)}",
+            inputs.get("source", ""),
+            inputs.get("geometry", ""),
+            f"N={outputs.get('exposures', '')}",
+            inputs.get("class_text", ""),
+        ]
+        raw = "|".join(str(p) for p in parts)
+        digest = hashlib.sha256(raw.encode("utf-8")).hexdigest()[:12]
+        return f"{raw}|HASH={digest}"
+
+    @staticmethod
+    def _make_qr_image(inputs, outputs):
+        """Builds a PIL QR image of the verification payload, or None if the
+        optional `qrcode` package is unavailable."""
+        try:
+            import qrcode
+            from qrcode.constants import ERROR_CORRECT_M
+            from qrcode.image.pil import PilImage
+            payload = PDFReportGenerator._build_qr_payload(inputs, outputs)
+            qr = qrcode.QRCode(version=2, error_correction=ERROR_CORRECT_M,
+                               box_size=4, border=2)
+            qr.add_data(payload)
+            qr.make(fit=True)
+            img = qr.make_image(fill_color="black", back_color="white", image_factory=PilImage)
+            return img.resize((120, 120))
+        except Exception:
+            return None
 
     def generate_report(self, filepath, inputs, outputs, warnings_list, defect_eval, lvl3_active, sfd_comp_val, lang_obj, dynamic_img_path=None, standard_img_path=None):
         """
@@ -115,8 +213,21 @@ class PDFReportGenerator:
             textColor=colors.HexColor('#b71c1c'), # Red warning text
         )
 
-        # Title
-        story.append(Paragraph(lang_obj.get("app_title"), title_style))
+        # Title (with optional verification QR code)
+        qr_img = self._make_qr_image(inputs, outputs)
+        if qr_img is not None:
+            header_table = Table(
+                [[Paragraph(lang_obj.get("app_title"), title_style), Image(qr_img, width=92, height=92)]],
+                colWidths=[408, 92]
+            )
+            header_table.setStyle(TableStyle([
+                ('VALIGN', (0,0), (-1,-1), 'MIDDLE'),
+                ('LEFTPADDING', (1,0), (1,0), 10),
+                ('ALIGN', (0,0), (0,0), 'CENTER'),
+            ]))
+            story.append(header_table)
+        else:
+            story.append(Paragraph(lang_obj.get("app_title"), title_style))
         story.append(Spacer(1, 15))
 
         # Metadata Row
@@ -133,6 +244,29 @@ class PDFReportGenerator:
         ]))
         story.append(meta_table)
         story.append(Spacer(1, 15))
+
+        # Report / procedure header fields (only non-empty ones)
+        report_info = inputs.get("report_info") or {}
+        info_fields = [
+            ("report_no", "report_no"), ("project", "project"),
+            ("welder_id", "welder_id"), ("wps_pqr", "wps_pqr"),
+            ("procedure_no", "procedure_no"), ("device_serial", "device_serial"),
+            ("calibration_date", "calibration_date"), ("personnel", "personnel"),
+        ]
+        filled_info = [(key, report_info.get(key, "")) for key, _ in info_fields if report_info.get(key)]
+        if filled_info:
+            story.append(Paragraph(lang_obj.get("report_info_section"), section_style))
+            info_rows = [[Paragraph(lang_obj.get(key), label_style), Paragraph(value, value_style)]
+                         for key, value in filled_info]
+            info_table = Table(info_rows, colWidths=[220, 280])
+            info_table.setStyle(TableStyle([
+                ('GRID', (0,0), (-1,-1), 0.5, colors.HexColor('#cfd8dc')),
+                ('BACKGROUND', (0,0), (0,-1), colors.HexColor('#f5f5f5')),
+                ('TOPPADDING', (0,0), (-1,-1), 4),
+                ('BOTTOMPADDING', (0,0), (-1,-1), 4),
+            ]))
+            story.append(info_table)
+            story.append(Spacer(1, 12))
 
         # Section 1: Inputs
         story.append(Paragraph(lang_obj.get("inputs_section"), section_style))
@@ -200,6 +334,15 @@ class PDFReportGenerator:
                 Paragraph("", label_style),
                 Paragraph("", value_style)
             ])
+
+        # Inspection standard
+        std_key = "standard_asme" if inputs.get("standard") == "asme" else "standard_iso"
+        inputs_data.append([
+            Paragraph(lang_obj.get("standard"), label_style),
+            Paragraph(lang_obj.get(std_key), value_style),
+            Paragraph("", label_style),
+            Paragraph("", value_style)
+        ])
         
         inputs_table = Table(inputs_data, colWidths=[140, 110, 140, 110])
         inputs_table.setStyle(TableStyle([
@@ -250,7 +393,23 @@ class PDFReportGenerator:
             [Paragraph(lang_obj.get("base_multiplier"), label_style), Paragraph(f"{outputs.get('base_multiplier', 1.0):.2f}", value_style),
              Paragraph("", label_style), Paragraph("", value_style)]
         ]
-        
+
+        # ASME/ASTM IQI and radiation barrier distance (when available)
+        asme_iqi = outputs.get("asme_iqi")
+        if asme_iqi and str(asme_iqi) != "N/A":
+            outputs_data.append([
+                Paragraph(lang_obj.get("asme_iqi"), label_style),
+                Paragraph(str(asme_iqi), value_style),
+                Paragraph("", label_style), Paragraph("", value_style)
+            ])
+        barrier = outputs.get("barrier_distance")
+        if barrier and str(barrier) != "N/A":
+            outputs_data.append([
+                Paragraph(lang_obj.get("barrier_distance"), label_style),
+                Paragraph(str(barrier), value_style),
+                Paragraph("", label_style), Paragraph("", value_style)
+            ])
+
         outputs_table = Table(outputs_data, colWidths=[140, 110, 140, 110])
         outputs_table.setStyle(TableStyle([
             ('GRID', (0,0), (-1,-1), 0.5, colors.HexColor('#b0bec5')),
@@ -450,6 +609,37 @@ class PDFReportGenerator:
             ('TOPPADDING', (0,1), (-1,1), 40), # Space for signatures
         ]))
         story.append(sig_table)
+
+        # Section 8: Owner, Contact & Disclaimer
+        owner_style = ParagraphStyle(
+            name='OwnerStyle',
+            fontName=self._resolve_font('Arial-Bold'),
+            fontSize=9,
+            leading=12,
+            textColor=colors.HexColor('#212121'),
+        )
+        contact_style = ParagraphStyle(
+            name='ContactStyle',
+            fontName=self._resolve_font('Arial'),
+            fontSize=8.5,
+            leading=12,
+            textColor=colors.HexColor('#0d47a1'),
+        )
+        small_muted_style = ParagraphStyle(
+            name='SmallMutedStyle',
+            fontName=self._resolve_font('Arial'),
+            fontSize=8,
+            leading=11,
+            textColor=colors.HexColor('#616161'),
+        )
+        story.append(Spacer(1, 12))
+        story.append(Paragraph(lang_obj.get("app_owner"), owner_style))
+        story.append(Spacer(1, 4))
+        story.append(Paragraph(lang_obj.get("contact_title"), owner_style))
+        story.append(Paragraph(lang_obj.get("contact_github"), contact_style))
+        story.append(Paragraph(lang_obj.get("contact_email"), contact_style))
+        story.append(Spacer(1, 6))
+        story.append(Paragraph(lang_obj.get("disclaimer"), small_muted_style))
 
         # Build PDF
         try:

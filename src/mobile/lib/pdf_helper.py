@@ -46,7 +46,7 @@ def generate_mobile_pdf(filepath, state, results, compliance, defect_eval, sketc
         "cap": vals["cap"],
         "sfd": vals.get("app_sfd", vals.get("sfd", 600)),
         "d": 2.0,
-        "tech_text": state.get_text(state.geometry),
+        "tech_text": state.get_text("digital_cr_dda" if vals["tech"] == "digital" else "analog_film"),
         "source_text": state.get_text(state.source),
         "geometry_text": state.get_text(state.geometry),
         "source": vals["source"],

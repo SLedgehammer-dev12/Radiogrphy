@@ -167,6 +167,44 @@ class TestPDFReportGenerator(unittest.TestCase):
         )
         self.assertTrue(result)
 
+    def test_turkish_pdf_embeds_truetype(self):
+        """Turkish-specific chars (Ğ/İ/ş/ı) require a TrueType font; the built-in
+        WinAnsi Helvetica cannot encode them. The PDF must embed a FontFile2."""
+        self.lang.set_language("tr")
+        filepath = os.path.join(self.tmpdir, "test_turkish_ttf.pdf")
+        self.gen.generate_report(
+            filepath,
+            self._make_inputs(
+                material_text="Çelik", class_text="Sınıf B",
+                tech_text="Analog Film (ISO 17636-1)",
+                source_text="İzotop (Ir-192)",
+                geometry_text="DWSI (Çift Cidar Tek Görüntü)",
+            ),
+            self._make_outputs(duplex_iqi="N/A (Analog Film)"),
+            ["Uyarı örneği: Ğ ğ İ ı Ş ş ç Ç ö Ö ü Ü"], None, False, None, self.lang
+        )
+        with open(filepath, "rb") as f:
+            data = f.read()
+        self.assertIn(b"/FontFile2", data,
+                      "PDF must embed a TrueType font (WinAnsi Helvetica lacks Ğ/İ/ş/ı)")
+
+    def test_report_owner_contact_disclaimer_section(self):
+        self.lang.set_language("tr")
+        filepath = os.path.join(self.tmpdir, "test_owner_contact.pdf")
+        result = self.gen.generate_report(
+            filepath, self._make_inputs(), self._make_outputs(),
+            [], None, False, None, self.lang
+        )
+        self.assertTrue(result)
+        self.assertGreater(os.path.getsize(filepath), 1000)
+
+    def test_font_map_avoids_winansi_helvetica(self):
+        # Arial (TrueType) or the bundled Noto Sans must be selected, never the
+        # built-in WinAnsi Helvetica which lacks Ğ/İ/ş/ı glyphs.
+        self.assertNotEqual(self.gen._FONT_MAP.get("Arial"), "Helvetica")
+        self.assertNotEqual(self.gen._FONT_MAP.get("Arial-Bold"), "Helvetica-Bold")
+        self.assertNotEqual(self.gen._FONT_MAP.get("Arial-Italic"), "Helvetica-Oblique")
+
     def test_generate_report_with_errors_handled(self):
         """Test that invalid inputs don't crash the report."""
         filepath = os.path.join(self.tmpdir, "test_edge.pdf")

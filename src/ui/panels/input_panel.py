@@ -101,7 +101,9 @@ class InputPanelMixin:
             self.trans.get("x_ray"),
             self.trans.get("isotope_ir192"),
             self.trans.get("isotope_se75"),
-            self.trans.get("isotope_co60")
+            self.trans.get("isotope_co60"),
+            self.trans.get("isotope_yb169"),
+            self.trans.get("isotope_tm170"),
         ])
         self.cmb_source.currentIndexChanged.connect(self.on_source_changed)
         grp_inputs_layout.addRow(self.trans.get("rad_source"), self.cmb_source)
@@ -128,6 +130,13 @@ class InputPanelMixin:
         ])
         self.cmb_class.currentIndexChanged.connect(self.update_calculations)
         grp_inputs_layout.addRow(self.trans.get("testing_class"), self.cmb_class)
+
+        # Inspection standard
+        self.cmb_standard = QComboBox()
+        self.cmb_standard.addItem(self.trans.get("standard_iso"), "iso")
+        self.cmb_standard.addItem(self.trans.get("standard_asme"), "asme")
+        self.cmb_standard.currentIndexChanged.connect(self.update_calculations)
+        grp_inputs_layout.addRow(self.trans.get("standard"), self.cmb_standard)
 
         # Geometry
         self.cmb_geometry = QComboBox()

@@ -56,6 +56,9 @@ class ExposureChartDatabase:
         "isotope_ir192": 13.2,
         "isotope_se75": 10.3,
         "isotope_co60": 21.0,
+        # Approximate broad-beam effective HVL for low-energy sources
+        "isotope_yb169": 6.0,
+        "isotope_tm170": 1.5,
     }
 
     # Gamma constants (R-m-Ci-h)
@@ -63,6 +66,8 @@ class ExposureChartDatabase:
         "isotope_ir192": 0.48,
         "isotope_se75": 0.20,
         "isotope_co60": 1.30,
+        "isotope_yb169": 0.125,
+        "isotope_tm170": 0.003,
     }
 
     TYPE_X_KV_VALUES = [80, 100, 120, 140, 160, 180, 200, 220, 240, 260, 280, 300, 320, 350]
