@@ -1,6 +1,6 @@
 # Changelog
 
-## [Unreleased] - Isotope decay, ASME B31.3/VIII, ASTM accuracy, report approval
+## [1.6.0] - 2026-08-26
 
 ### Added
 - Isotope decay engine: `calculate_decayed_activity` (A0·2^(-Δt/T½)) with half-lives
