@@ -1,5 +1,24 @@
 # Release Procedure
 
+## Standard Values Verification (QA)
+
+The following tables use engineering approximations and **must be verified
+against the current edition of the referenced standard** before use in formal
+acceptance decisions:
+
+| Module | Approximate values | Reference |
+|---|---|---|
+| `src/core/iso5817.py` | Quality-level limits for porosity, slag, undercut, IP/IF | ISO 5817 |
+| `src/core/asme_b31_3.py` | Table 341.3.2 service limits | ASME B31.3 |
+| `src/core/asme_viii.py` | UW-51 / UW-52 limits | ASME BPVC Sec. VIII Div. 1 |
+| `src/core/calculator.py` (`E747_WIRE_DIA_MM`) | ASTM E747 wire diameters (1-21) | ASTM E747 |
+| `src/core/calculator.py` (isotope `MU`) | Yb-169 / Tm-170 attenuation coefficients | NIST / manufacturer data |
+| `src/core/exposure_charts.py` (`HVL`) | Yb-169 / Tm-170 half-value layers | manufacturer exposure charts |
+| `src/core/calculator.py` (`GAMMA_*`) | Gamma constants (R and mSv conventions) | IAEA / source certificates |
+
+Procedure: for each table, diff the implemented thresholds against the standard
+text, update the constants, and add a regression test in `tests/`.
+
 ## Prerequisites
 - Write access to the repository
 - GitHub Actions enabled

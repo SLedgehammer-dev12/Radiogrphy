@@ -172,7 +172,7 @@ jobs:
             ghcr.io/kivy/buildozer:latest \
             -c "\
               apt-get update -qq && \
-              apt-get install -y -qq wget && \
+              apt-get install -y -qq wget libgl1-mesa-dev libglu1-mesa-dev mesa-common-dev && \
               buildozer android debug"
       - name: Upload APK artifact
         if: hashFiles('bin/*.apk') != ''

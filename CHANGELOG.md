@@ -1,11 +1,20 @@
 # Changelog
 
-## [Unreleased] - Follow-up fixes
+## [1.6.1] - 2026-08-26
 
 ### Added
 - Mobile parity: Yb-169 / Tm-170 selectable as radiation sources on Android, and
   the radiation barrier distance (controlled/supervised) shown on the results screen
 - `qrcode` added to `pyproject.toml` dependencies (kept in sync with requirements)
+
+### Fixed
+- Android APK build: install Mesa/OpenGL dev headers (`libgl1-mesa-dev`,
+  `libglu1-mesa-dev`, `mesa-common-dev`) in the buildozer docker so the kivy
+  wheel build can find `GL/gl.h`
+
+### Docs
+- `RELEASE.md`: standard-values verification (QA) checklist for the approximate
+  ISO 5817 / ASME / ASTM / isotope tables
 
 ## [1.6.0] - 2026-08-26
 
