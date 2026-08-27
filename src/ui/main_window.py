@@ -2455,15 +2455,17 @@ class MainWindow(QMainWindow,
 
         # Filter recommendation output
         filter_recs = self.calc.get_filter_recommendations(source, material, input_kv, testing_class)
-        # Format string based on language
+        # Format string based on language (screen table is ISO 17636-1 Clause 7.3)
+        st = filter_recs.get("screen_table", {})
         if self.trans.language == "tr":
-            pb = filter_recs["pb_screen"]
-            pb = pb.replace("Front", "Ön").replace("Back", "Arka").replace("None", "Yok").replace("Front & Back", "Ön & Arka")
-            filt = filter_recs["metal_filter"]
-            filt = filt.replace("None", "Yok").replace("or", "veya")
-            filter_str = f"{pb} | Filtre: {filt}"
+            filt = filter_recs["metal_filter"].replace("Yok", "Yok").replace("veya", "veya")
+            filter_str = (f"Ön: {st.get('front_mm', '')} mm Pb | Arka: {st.get('back_mm', '')} mm Pb"
+                          f" | Filtre: {filt}")
         else:
-            filter_str = f"{filter_recs['pb_screen']} | Filter: {filter_recs['metal_filter']}"
+            front_en = {"<= 0.15 (opsiyonel)": "<= 0.15 (optional)"}.get(st.get('front_mm', ''), st.get('front_mm', ''))
+            back_en = {"<= 0.15 veya yok": "<= 0.15 or none"}.get(st.get('back_mm', ''), st.get('back_mm', ''))
+            filter_str = (f"Front: {front_en} mm Pb | Back: {back_en} mm Pb"
+                          f" | Filter: {filter_recs['metal_filter']}")
             
         self.out_labels["filter_recommendation"][1].setText(filter_str)
 

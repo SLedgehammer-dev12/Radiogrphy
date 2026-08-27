@@ -332,23 +332,24 @@ class TestRTCalculator(unittest.TestCase):
     def test_get_filter_recommendations(self):
         # X-ray on steel, 120 kV
         recs = self.calc.get_filter_recommendations("x_ray", "steel", 120.0, "class_b")
-        self.assertEqual(recs["pb_screen"], "0.02-0.10 mm Pb (Front) / None (Back)")
-        self.assertEqual(recs["metal_filter"], "0.5 mm Cu or 1.0 mm Al")
+        self.assertEqual(recs["screen_table"]["front_mm"], "<= 0.15 (opsiyonel)")
+        self.assertEqual(recs["metal_filter"], "0.5 mm Cu veya 1.0 mm Al")
 
         # Isotope Ir-192
         recs_ir = self.calc.get_filter_recommendations("isotope_ir192", "steel", None, "class_b")
-        self.assertEqual(recs_ir["pb_screen"], "0.02-0.10 mm Pb (Front & Back)")
-        self.assertEqual(recs_ir["metal_filter"], "1.0 mm Cu or 1.0 mm Pb")
+        self.assertEqual(recs_ir["screen_table"]["front_mm"], "0.05-0.20")
+        self.assertEqual(recs_ir["screen_table"]["back_mm"], "0.05-0.20")
+        self.assertEqual(recs_ir["metal_filter"], "1.0 mm Cu veya 1.0 mm Pb")
 
         # Isotope Co-60
         recs_co = self.calc.get_filter_recommendations("isotope_co60", "steel", None, "class_a")
-        self.assertEqual(recs_co["pb_screen"], "0.05-0.15 mm Pb (Front & Back)")
+        self.assertEqual(recs_co["screen_table"]["front_mm"], "0.10-0.30")
         self.assertEqual(recs_co["metal_filter"], "1.0-2.0 mm Pb")
 
-        # X-ray at high voltage (> 250 kV)
+        # X-ray at high voltage (> 250 kV, <= 450 kV)
         recs_high = self.calc.get_filter_recommendations("x_ray", "steel", 300.0, "class_b")
-        self.assertEqual(recs_high["pb_screen"], "0.02-0.10 mm Pb (Front) / 0.02-0.10 mm Pb (Back)")
-        self.assertEqual(recs_high["metal_filter"], "1.0-2.0 mm Cu")
+        self.assertEqual(recs_high["screen_table"]["front_mm"], "0.05-0.15")
+        self.assertEqual(recs_high["metal_filter"], "1.0 mm Cu")
 
     def test_calculate_dwsi_exposures(self):
         # Class A, OD=114.3, t=8.56, SFD=600.0

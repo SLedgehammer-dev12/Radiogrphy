@@ -1,5 +1,14 @@
 # Changelog
 
+## [Unreleased] - Lead screen table & physical-scale safety ring
+
+### Added
+- ISO 17636-1:2022 Clause 7.3 lead-screen table: source/kV-based front/back lead
+  screen thickness ranges returned by `get_filter_recommendations` (`screen_table`)
+  and shown in the filter recommendation output
+- Setup schematic now includes a true metre-scale plan-view inset of the radiation
+  safety perimeter (pipe drawn to real scale inside the actual safety-circle radius)
+
 ## [1.6.1] - 2026-08-26
 
 ### Added

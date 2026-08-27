@@ -1737,50 +1737,64 @@ class RTCalculator:
 
     def get_filter_recommendations(self, source, material, kv, testing_class):
         """
-        Determines recommended lead screen thickness and metal filter based on ISO 17636-1 rules.
+        Determines recommended lead screen thickness and metal filter based on
+        ISO 17636-1:2022 Clause 7.3 (lead screens) and metal filters.
+        Returns dict with pb_screen, metal_filter and screen_table (front/back
+        lead thickness ranges in mm per the standard).
         """
         pb_screen = ""
         metal_filter = ""
-        
+        screen_table = {"front_mm": "", "back_mm": ""}
+
         if source == "x_ray":
             if kv is None:
                 kv = 120.0
-            
-            # Pb Screen
-            if kv <= 150.0:
-                pb_screen = "0.02-0.10 mm Pb (Front) / None (Back)"
+            # ISO 17636-1:2022 Clause 7.3.2 — lead screen thickness (mm)
+            if kv <= 120.0:
+                front = "<= 0.15 (opsiyonel)"
+                back = "<= 0.15 veya yok"
+                metal_filter = "Yok veya 0.1 mm Al" if kv < 120.0 else "0.5 mm Cu veya 1.0 mm Al"
             elif kv <= 250.0:
-                pb_screen = "0.02-0.10 mm Pb (Front) / 0.02-0.10 mm Pb (Back)"
-            else:
-                pb_screen = "0.02-0.10 mm Pb (Front) / 0.02-0.10 mm Pb (Back)"
-                
-            # Metal Filter
-            if kv < 120.0:
-                metal_filter = "None or 0.1 mm Al"
-            elif kv <= 150.0:
-                metal_filter = "0.5 mm Cu or 1.0 mm Al"
-            elif kv <= 250.0:
+                front = "0.02-0.15"
+                back = "0.02-0.15"
+                metal_filter = "0.5 mm Cu veya 1.0 mm Al"
+            elif kv <= 450.0:
+                front = "0.05-0.15"
+                back = "0.05-0.15"
                 metal_filter = "1.0 mm Cu"
-            else:
+            elif kv <= 1000.0:
+                front = "0.10-0.30"
+                back = "0.10-0.30"
                 metal_filter = "1.0-2.0 mm Cu"
+            else:
+                front = "1-2 mm Cu (ön ekran)"
+                back = "0.10-0.30"
+                metal_filter = "1.0-2.0 mm Cu"
+            pb_screen = f"Ön: {front} mm Pb | Arka: {back} mm Pb"
         else:
             # Isotopes
             if source == "isotope_se75":
-                pb_screen = "0.02-0.10 mm Pb (Front & Back)"
+                front, back = "0.02-0.20", "0.02-0.20"
                 metal_filter = "0.5 mm Cu"
             elif source == "isotope_ir192":
-                pb_screen = "0.02-0.10 mm Pb (Front & Back)"
-                metal_filter = "1.0 mm Cu or 1.0 mm Pb"
+                front, back = "0.05-0.20", "0.05-0.20"
+                metal_filter = "1.0 mm Cu veya 1.0 mm Pb"
             elif source == "isotope_co60":
-                pb_screen = "0.05-0.15 mm Pb (Front & Back)"
+                front, back = "0.10-0.30", "0.10-0.30"
                 metal_filter = "1.0-2.0 mm Pb"
+            elif source in ("isotope_yb169", "isotope_tm170"):
+                front, back = "0.02-0.20", "0.02-0.20"
+                metal_filter = "0.5 mm Cu"
             else:
-                pb_screen = "None"
-                metal_filter = "None"
-                
+                front, back = "0.02-0.15", "0.02-0.15"
+                metal_filter = "Yok"
+            pb_screen = f"Ön: {front} mm Pb | Arka: {back} mm Pb"
+
+        screen_table = {"front_mm": front, "back_mm": back}
         return {
             "pb_screen": pb_screen,
-            "metal_filter": metal_filter
+            "metal_filter": metal_filter,
+            "screen_table": screen_table,
         }
 
     # -----------------------------------------------------------------------

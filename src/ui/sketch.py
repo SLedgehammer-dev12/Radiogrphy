@@ -25,6 +25,10 @@ class WeldSketchCanvas(FigureCanvas):
                    panel_width=None, panel_height=None, overlap_pct=10.0, n_panel=None,
                    safety_radius_m=None):
         self.axes.clear()
+        # Remove any previously added metre-scale inset axes
+        for ax in list(self.fig.axes):
+            if ax is not self.axes:
+                self.fig.delaxes(ax)
         
         # Detect background color preference based on theme
         bg_color = '#1e1e2e' if is_dark else '#ffffff'
@@ -166,6 +170,21 @@ class WeldSketchCanvas(FigureCanvas):
             self.axes.text(ring_r * 0.7, ring_r * 0.7,
                            f"{lang_obj.get('safety_ring')}: R≈{safety_radius_m:.0f} m",
                            color=text_color, fontsize=7, alpha=0.85)
+            # True metre-scale plan view: pipe drawn to real scale (tiny dot)
+            # inside the actual safety circle radius.
+            ax_m = self.fig.add_axes([0.70, 0.62, 0.27, 0.27])
+            ax_m.set_aspect('equal')
+            ax_m.set_facecolor(bg_color)
+            ax_m.add_patch(patches.Circle((0, 0), safety_radius_m, color=weld_color,
+                                          fill=False, linewidth=1.2, linestyle='--'))
+            pipe_r_m = max((OD / 2.0) / 1000.0, 0.0005)
+            ax_m.add_patch(patches.Circle((0, 0), pipe_r_m, color=pipe_color, fill=False, linewidth=1.2))
+            ax_m.plot(0, 0, marker='*', color=source_color, markersize=6)
+            ax_m.set_xlim(-safety_radius_m * 1.15, safety_radius_m * 1.15)
+            ax_m.set_ylim(-safety_radius_m * 1.15, safety_radius_m * 1.15)
+            ax_m.axis('off')
+            ax_m.set_title(f"{lang_obj.get('safety_ring')} (m)",
+                           color=text_color, fontsize=7)
 
         # Flat-panel DDA coverage overlay (digital mode, when panel width is provided)
         if panel_width is not None:
