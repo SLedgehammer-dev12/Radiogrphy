@@ -1,5 +1,12 @@
 # Changelog
 
+## [Unreleased] - Follow-up fixes
+
+### Added
+- Mobile parity: Yb-169 / Tm-170 selectable as radiation sources on Android, and
+  the radiation barrier distance (controlled/supervised) shown on the results screen
+- `qrcode` added to `pyproject.toml` dependencies (kept in sync with requirements)
+
 ## [1.6.0] - 2026-08-26
 
 ### Added

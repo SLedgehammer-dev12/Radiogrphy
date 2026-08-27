@@ -45,6 +45,8 @@ class StepResults(MDScreen):
         self.ids.sfd_min_val.text = f"{results.get('sfd_min', 0):.0f} mm"
         self.ids.iqi_val.text = str(results.get("single_wire_iqi", {}).get("label", "-"))
         self.ids.time_val.text = f"{results.get('calc_time', 0):.1f} sn"
+        if hasattr(self.ids, "barrier_val"):
+            self.ids.barrier_val.text = str(results.get("barrier_distance", "") or "-")
 
         checks = compliance.get("checks", []) if compliance else []
         self.ids.compliance_container.clear_widgets()

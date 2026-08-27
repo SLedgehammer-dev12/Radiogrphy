@@ -10,7 +10,8 @@ from kivy.properties import StringProperty, ObjectProperty
 TECHNIQUES = ["swsi", "dwsi", "dwdi_elliptic", "dwdi_super"]
 MATERIALS = ["steel", "aluminum", "titanium", "copper_nickel"]
 CLASSES = ["class_a", "class_b"]
-SOURCES = ["x_ray", "isotope_ir192", "isotope_se75", "isotope_co60"]
+SOURCES = ["x_ray", "isotope_ir192", "isotope_se75", "isotope_co60",
+           "isotope_yb169", "isotope_tm170"]
 GEOMETRIES = ["swsi", "dwdi_elliptic", "dwdi_super", "dwsi"]
 
 

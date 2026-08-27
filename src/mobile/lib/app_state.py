@@ -167,7 +167,11 @@ class AppState:
         except Exception:
             sfd_min = 0.0
         try:
-            base_e = 3.0 if vals["source"] == "x_ray" else (30.0 if vals["source"] == "isotope_ir192" else (40.0 if vals["source"] == "isotope_se75" else 20.0))
+            base_e = 3.0 if vals["source"] == "x_ray" else \
+                (30.0 if vals["source"] == "isotope_ir192" else
+                 (40.0 if vals["source"] == "isotope_se75" else
+                  (20.0 if vals["source"] == "isotope_co60" else
+                   (150.0 if vals["source"] == "isotope_yb169" else 500.0))))
             _min, _sec, calc_time = self.calc.calculate_exposure_time(
                 sfd=vals["app_sfd"],
                 w_eff=w_eff,
@@ -242,6 +246,20 @@ class AppState:
                 dwdi_warnings.append("DWDI super: 3 exposures (120°/60°) (ISO 17636-1 7.1.7)")
         self.warnings = dwdi_warnings
 
+        # Radiation barrier distance (isotopes) - controlled 20 / supervised 7.5 uSv/h
+        barrier_str = ""
+        if vals["source"] != "x_ray":
+            try:
+                act_ci = float(vals.get("output_val", 0) or 0)
+            except (TypeError, ValueError):
+                act_ci = 0.0
+            r_c, _, _ = self.calc.calculate_barrier_distance(vals["source"], act_ci, limit_usvh=20.0, hvl_layers=0.0, convention="r")
+            r_s, _, _ = self.calc.calculate_barrier_distance(vals["source"], act_ci, limit_usvh=7.5, hvl_layers=0.0, convention="r")
+            if self.language == "tr":
+                barrier_str = f"Kontrollü (20 µSv/h): {r_c:.1f} m | Gözetimli (7.5): {r_s:.1f} m"
+            else:
+                barrier_str = f"Controlled (20 µSv/h): {r_c:.1f} m | Supervised (7.5): {r_s:.1f} m"
+
         self.results = {
             "w_nom": w_nom,
             "w_eff": w_eff,
@@ -257,6 +275,7 @@ class AppState:
             "target_snr": target_snr,
             "req_exposures": exposures,
             "warnings": self.warnings,
+            "barrier_distance": barrier_str,
             "required_film_class": req_film,
             "filter_recommendation": filter_rec,
             "required_quality": target_snr if vals["tech"] == "digital" else 2.0,
