@@ -1,6 +1,6 @@
 # Changelog
 
-## [Unreleased] - Lead screen table & physical-scale safety ring
+## [1.6.2] - 2026-08-27
 
 ### Added
 - ISO 17636-1:2022 Clause 7.3 lead-screen table: source/kV-based front/back lead
