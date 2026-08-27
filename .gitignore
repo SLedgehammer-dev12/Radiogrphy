@@ -30,3 +30,7 @@ htmlcov/
 
 # Build artifacts
 release-artifacts/
+
+# Android (buildozer)
+.buildozer/
+bin/

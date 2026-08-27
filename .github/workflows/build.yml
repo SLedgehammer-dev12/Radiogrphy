@@ -160,6 +160,13 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      - name: Cache buildozer (Android SDK/NDK)
+        uses: actions/cache@v4
+        with:
+          path: .buildozer/android/platform
+          key: buildozer-platform-${{ hashFiles('buildozer.spec') }}
+          restore-keys: |
+            buildozer-platform-
       - name: Build APK with Buildozer (Docker)
         env:
           NO_RL_ACCEL: "1"
