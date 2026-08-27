@@ -163,10 +163,12 @@ jobs:
       - name: Cache buildozer (Android SDK/NDK)
         uses: actions/cache@v4
         with:
-          path: .buildozer/android/platform
-          key: buildozer-platform-${{ hashFiles('buildozer.spec') }}
+          path: |
+            .buildozer/android-sdk
+            .buildozer/android-ndk
+          key: buildozer-sdk-ndk-${{ hashFiles('buildozer.spec') }}
           restore-keys: |
-            buildozer-platform-
+            buildozer-sdk-ndk-
       - name: Build APK with Buildozer (Docker)
         env:
           NO_RL_ACCEL: "1"

@@ -123,10 +123,12 @@ android.ndk = 29
 #android.ndk_api = 21
 
 # (str) Android NDK directory (if empty, it will be automatically downloaded.)
-#android.ndk_path =
+# Kept inside the project's .buildozer so CI can cache it (the buildozer docker
+# container otherwise downloads the SDK/NDK to /root/.buildozer each run).
+android.ndk_path = .buildozer/android-ndk
 
 # (str) Android SDK directory (if empty, it will be automatically downloaded.)
-#android.sdk_path =
+android.sdk_path = .buildozer/android-sdk
 
 # (str) ANT directory (if empty, it will be automatically downloaded.)
 #android.ant_path =
