@@ -173,16 +173,20 @@ jobs:
         env:
           NO_RL_ACCEL: "1"
         run: |
-          docker run --rm \
-            -e NO_RL_ACCEL=1 \
-            -v ${{ github.workspace }}:/app \
-            -w /app \
-            --entrypoint /bin/bash \
-            ghcr.io/kivy/buildozer:latest \
-            -c "\
-              apt-get update -qq && \
-              apt-get install -y -qq wget libgl1-mesa-dev libglu1-mesa-dev mesa-common-dev && \
-              buildozer android debug"
+          for i in 1 2 3 4; do
+            docker run --rm \
+              -e NO_RL_ACCEL=1 \
+              -e PIP_RETRIES=10 \
+              -e PIP_TIMEOUT=60 \
+              -v ${{ github.workspace }}:/app \
+              -w /app \
+              --entrypoint /bin/bash \
+              ghcr.io/kivy/buildozer:latest \
+              -c "apt-get update -qq && apt-get install -y -qq wget libgl1-mesa-dev libglu1-mesa-dev mesa-common-dev && buildozer android debug" \
+              && break
+            echo "Android build attempt $i failed; retrying in 30s..."
+            sleep 30
+          done
       - name: Upload APK artifact
         if: hashFiles('bin/*.apk') != ''
         uses: actions/upload-artifact@v4
