@@ -43,7 +43,14 @@ class StepResults(MDScreen):
         else:
             self.ids.u_max_val.text = "N/A"
         self.ids.sfd_min_val.text = f"{results.get('sfd_min', 0):.0f} mm"
-        self.ids.iqi_val.text = str(results.get("single_wire_iqi", {}).get("label", "-"))
+        single_wire_iqi = results.get("single_wire_iqi")
+        if isinstance(single_wire_iqi, tuple):
+            iqi_text = str(single_wire_iqi[0])
+        elif isinstance(single_wire_iqi, dict):
+            iqi_text = str(single_wire_iqi.get("label", "-"))
+        else:
+            iqi_text = str(single_wire_iqi) if single_wire_iqi else "-"
+        self.ids.iqi_val.text = iqi_text
         self.ids.time_val.text = f"{results.get('calc_time', 0):.1f} sn"
         if hasattr(self.ids, "barrier_val"):
             self.ids.barrier_val.text = str(results.get("barrier_distance", "") or "-")

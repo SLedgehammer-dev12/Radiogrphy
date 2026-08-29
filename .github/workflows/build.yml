@@ -169,6 +169,11 @@ jobs:
           key: buildozer-sdk-ndk-${{ hashFiles('buildozer.spec') }}
           restore-keys: |
             buildozer-sdk-ndk-
+      - name: Sync buildozer.spec version from src/core/version.py
+        run: |
+          VER="$(python3 -c "import re;print(re.search(r'__version__\\s*=\\s*[\"\\']([^\"\\']+)',open('src/core/version.py').read()).group(1))")"
+          sed -i.bak "s/^version = .*/version = ${VER}/" buildozer.spec
+          grep -n "^version = " buildozer.spec
       - name: Build APK with Buildozer (Docker)
         env:
           NO_RL_ACCEL: "1"

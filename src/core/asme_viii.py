@@ -10,6 +10,9 @@ Verify against the current edition of ASME BPVC Section VIII Div. 1.
 
 class ASMEVIIIEvaluator:
     MODES = ("UW-51", "UW-52")
+    # Limits below are engineering approximations of UW-51/UW-52; not a
+    # substitute for the current edition of ASME BPVC Sec VIII Div. 1.
+    IS_APPROXIMATION = True
 
     def _msg(self, lang, key, *args):
         table = {

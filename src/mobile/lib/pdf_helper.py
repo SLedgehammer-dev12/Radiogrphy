@@ -1,9 +1,12 @@
 import os
 import sys
 import tempfile
+import logging
 from datetime import datetime
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", ".."))
+
+logger = logging.getLogger("radiography.mobile.pdf_helper")
 
 
 FONTS = [
@@ -23,13 +26,13 @@ def _register_noto():
                 pdfmetrics.registerFont(TTFont(name, path))
                 registered = True
             except Exception:
-                pass
+                logger.warning("Could not register bundled font %s at %s", name, path, exc_info=True)
     return registered
 
 
 def generate_mobile_pdf(filepath, state, results, compliance, defect_eval, sketch_path=None):
     from core.report import PDFReportGenerator
-    from core.translation import Translation
+    from core.translation import Translation, format_filter_recommendation
 
     _register_noto()
     trans = Translation()
@@ -65,10 +68,7 @@ def generate_mobile_pdf(filepath, state, results, compliance, defect_eval, sketc
 
     filter_rec = results.get("filter_recommendation", "")
     if isinstance(filter_rec, dict):
-        parts = []
-        for k, v in filter_rec.items():
-            parts.append(f"{k}: {v}")
-        filter_rec = "; ".join(parts)
+        filter_rec = format_filter_recommendation(filter_rec, lang)
     elif not isinstance(filter_rec, str):
         filter_rec = str(filter_rec)
 
@@ -128,14 +128,22 @@ def share_pdf(filepath):
             Uri = autoclass("android.net.Uri")
             File = autoclass("java.io.File")
             PythonActivity = autoclass("org.kivy.android.PythonActivity")
+            FileProvider = autoclass("androidx.core.content.FileProvider")
+            Build_VERSION = autoclass("android.os.Build$VERSION")
 
             file = File(filepath)
-            uri = Uri.fromFile(file)
+            current_activity = PythonActivity.mActivity
+            authority = f"{current_activity.getPackageName()}.fileprovider"
+
+            if Build_VERSION.SDK_INT >= 24:  # Android 7.0 (API 24)
+                uri = FileProvider.getUriForFile(current_activity, authority, file)
+            else:
+                uri = Uri.fromFile(file)
+
             intent = Intent(Intent.ACTION_SEND)
             intent.setType("application/pdf")
             intent.putExtra(Intent.EXTRA_STREAM, uri)
             intent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
-            current_activity = PythonActivity.mActivity
             current_activity.startActivity(Intent.createChooser(intent, "Paylaş PDF"))
             return True
         except Exception:

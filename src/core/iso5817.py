@@ -12,6 +12,9 @@ the standard before use in formal acceptance decisions.
 
 class ISO5817Evaluator:
     LEVELS = ("B", "C", "D")
+    # Limits below are engineering approximations; not a substitute for the
+    # current edition of ISO 5817 in formal acceptance decisions.
+    IS_APPROXIMATION = True
 
     def _msg(self, lang, key, *args):
         table = {

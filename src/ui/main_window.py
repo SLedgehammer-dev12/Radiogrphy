@@ -3,6 +3,7 @@
 import os
 import json
 import tempfile
+import logging
 from datetime import datetime
 from PyQt6.QtWidgets import (QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QGridLayout, 
                              QLabel, QComboBox, QLineEdit, QRadioButton, QButtonGroup, 
@@ -26,6 +27,9 @@ from src.core.asme_b36 import ASME_B36_10_PIPES
 from src.ui.panels.input_panel import InputPanelMixin, QFormLayout_custom
 from src.ui.panels.defect_panel import DefectPanelMixin
 from src.ui.panels.warnings_compliance_panel import WarningsPanelMixin, CompliancePanelMixin
+
+
+logger = logging.getLogger("radiography.ui.main_window")
 
 
 class MainWindow(QMainWindow,
@@ -1088,11 +1092,15 @@ class MainWindow(QMainWindow,
             self.cmb_std_figure.addItem(self.trans.get("fig5_title"), "fig5")
             self.cmb_std_figure.addItem(self.trans.get("fig6_title"), "fig6")
             self.cmb_std_figure.addItem(self.trans.get("fig7_title"), "fig7")
+            self.cmb_std_figure.addItem(self.trans.get("fig8b_title"), "fig8b")
+            self.cmb_std_figure.addItem(self.trans.get("fig9b_title"), "fig9b")
         elif geometry in ["dwdi_elliptic", "dwdi_super"]:
             self.cmb_std_figure.addItem(self.trans.get("fig11_title"), "fig11")
             self.cmb_std_figure.addItem(self.trans.get("fig12_title"), "fig12")
+            self.cmb_std_figure.addItem(self.trans.get("fig14b_title"), "fig14b")
         else: # dwsi
             self.cmb_std_figure.addItem(self.trans.get("fig13_title"), "fig13")
+            self.cmb_std_figure.addItem(self.trans.get("fig10b_title"), "fig10b")
             
         # Try to restore previous selection
         found = False
@@ -1361,6 +1369,7 @@ class MainWindow(QMainWindow,
         "txt_d", "txt_app_sfd", "txt_dd", "txt_bed", "txt_bgap",
         "txt_panel_width", "txt_panel_height", "txt_app_overlap",
         "txt_f_source", "txt_b_object",
+        "txt_defect_length", "txt_defect_width", "txt_defect_accum",
     ]
 
     def _to_mm(self, value):
@@ -1410,8 +1419,13 @@ class MainWindow(QMainWindow,
             except ValueError:
                 lbl_current.setText("-")
                 return
-            current = self.calc.calculate_decayed_activity(
-                a0, txt_calib.text().strip(), None, source)
+            try:
+                current = self.calc.calculate_decayed_activity(
+                    a0, txt_calib.text().strip(), None, source)
+            except Exception:
+                logger.exception("Isotope decay tool update failed")
+                lbl_current.setText("-")
+                return
             lbl_current.setText(f"{current:.1f} Ci")
 
         txt_a0.textChanged.connect(lambda *_: _update())
@@ -1426,7 +1440,7 @@ class MainWindow(QMainWindow,
                 current = self.calc.calculate_decayed_activity(
                     float(txt_a0.text().strip().replace(",", ".")),
                     txt_calib.text().strip(), None, source)
-            except ValueError:
+            except Exception:
                 current = 0.0
             if current > 0.0:
                 unit = self.cmb_activity_unit.currentText() if hasattr(self, "cmb_activity_unit") else "Ci"
@@ -1508,11 +1522,13 @@ class MainWindow(QMainWindow,
         # Outer Diameter (OD) fallback logic
         custom_od_str = self.txt_custom_od.text().strip().replace(",", ".")
         od = None
+        od_from_custom = False
         if custom_od_str:
             try:
                 val = float(custom_od_str)
                 if val > 0:
                     od = val
+                    od_from_custom = True
             except ValueError:
                 pass
 
@@ -1523,11 +1539,13 @@ class MainWindow(QMainWindow,
         # Wall Thickness (t) fallback logic
         custom_t_str = self.txt_custom_t.text().strip().replace(",", ".")
         t = None
+        t_from_custom = False
         if custom_t_str:
             try:
                 val = float(custom_t_str)
                 if val > 0:
                     t = val
+                    t_from_custom = True
             except ValueError:
                 pass
 
@@ -1585,9 +1603,13 @@ class MainWindow(QMainWindow,
         # Chart source
         chart_source = self.cmb_chart_source.currentData() if hasattr(self, 'cmb_chart_source') else "model"
 
-        return (self._to_mm(od), self._to_mm(t), self._to_mm(cap), self._to_mm(weld_width),
-            self._to_mm(d), self._to_mm(sfd), output_val, base_e,
-            detector_type, film_class_used, chart_source)
+        # Apply unit conversion only for custom-entered values (od/t from text fields)
+        # Standard pipe combo values are already in mm and must NOT be double-converted
+        return (self._to_mm(od) if od_from_custom else od,
+                self._to_mm(t) if t_from_custom else t,
+                self._to_mm(cap), self._to_mm(weld_width),
+                self._to_mm(d), self._to_mm(sfd), output_val, base_e,
+                detector_type, film_class_used, chart_source)
 
     def get_applied_exposures(self):
         """
@@ -1861,6 +1883,65 @@ class MainWindow(QMainWindow,
         except Exception as e:
             QMessageBox.critical(self, "Error", f"Could not import CSV: {e}")
 
+    def _compute_geometry(self, od, t, d, sfd, geometry, testing_class):
+        """
+        Shared geometric calculation block used by update_calculations and
+        export_pdf_report so the UI and the PDF always agree.
+        Returns dict: b_dist, b_eff, b_rule_applied, f_min, sfd_min, sdd_min,
+        ug, f_min_star, ci_factor.
+        """
+        is_curved = self.rad_detector_curved.isChecked()
+        std_figure = self.cmb_std_figure.currentData() if hasattr(self, 'cmb_std_figure') else None
+        try:
+            bed = self._to_mm(float(self.txt_bed.text().replace(",", ".")))
+        except ValueError:
+            bed = 0.0
+        try:
+            bgap = self._to_mm(float(self.txt_bgap.text().replace(",", ".")))
+        except ValueError:
+            bgap = 5.0
+
+        if is_curved and self.calc.is_central_projection(geometry, std_figure):
+            b_dist = self.calc.calculate_b_panoramic(bed, bgap, t)
+        elif is_curved:
+            b_dist = self.calc.calculate_b_curved(bed, bgap, t, testing_class)
+        else:
+            b_dist = t if geometry in ["swsi", "dwsi"] else od
+        b_eff, b_rule_applied = self.calc.get_effective_b(b_dist, t)
+
+        f_min = self.calc.calculate_f_min(d, b_dist, testing_class, t)
+        f_min_star, ci_factor = self.calc.calculate_f_min_star(d, b_dist, t, testing_class)
+        if f_min_star is not None and f_min_star > f_min:
+            f_min = f_min_star
+
+        sfd_min = f_min + b_dist
+        try:
+            dd = self._to_mm(float(self.txt_dd.text().replace(",", ".")))
+        except ValueError:
+            dd = 200.0
+        sdd_min = self.calc.calculate_sdd_min(dd)
+        if sdd_min > sfd_min:
+            sfd_min = sdd_min
+
+        ug = self.calc.calculate_geometric_unsharpness(d, b_dist, sfd)
+
+        return {
+            "b_dist": b_dist,
+            "b_eff": b_eff,
+            "b_rule_applied": b_rule_applied,
+            "f_min": f_min,
+            "sfd_min": sfd_min,
+            "sdd_min": sdd_min,
+            "ug": ug,
+            "f_min_star": f_min_star,
+            "ci_factor": ci_factor,
+            "is_curved": is_curved,
+            "std_figure": std_figure,
+            "bed": bed,
+            "bgap": bgap,
+            "dd": dd,
+        }
+
     def update_calculations(self):
         # 1. Fetch values
         od, t, cap, weld_width, d, sfd, output_val, base_e, detector_type, film_class_used, chart_source = self.get_form_values()
@@ -1896,49 +1977,20 @@ class MainWindow(QMainWindow,
         # Tube Voltage kV
         u_max = self.calc.calculate_u_max(w_nom, material)
 
-        # Minimum Source-to-Object distance (f_min)
-        # In ISO 17636, object-to-detector distance b:
-        # SWSI and DWSI -> b = t
-        # DWDI -> b = OD
-        # Curved/planar detectors -> b = bed + bgap + K*t (Formulae 8-12)
-        is_curved = self.rad_detector_curved.isChecked()
-        std_figure = self.cmb_std_figure.currentData() if hasattr(self, 'cmb_std_figure') else None
-        try:
-            bed = self._to_mm(float(self.txt_bed.text().replace(",", ".")))
-        except ValueError:
-            bed = 0.0
-        try:
-            bgap = self._to_mm(float(self.txt_bgap.text().replace(",", ".")))
-        except ValueError:
-            bgap = 5.0
-
-        if is_curved and self.calc.is_central_projection(geometry, std_figure):
-            b_dist = self.calc.calculate_b_panoramic(bed, bgap, t)
-        elif is_curved:
-            b_dist = self.calc.calculate_b_curved(bed, bgap, t, testing_class)
-        else:
-            b_dist = t if geometry in ["swsi", "dwsi"] else od
-        b_eff, b_rule_applied = self.calc.get_effective_b(b_dist, t)
-        f_min = self.calc.calculate_f_min(d, b_dist, testing_class, t)
-
-        # Min Source-to-Detector Distance (SFD_min)
-        # SFD = f + b. So SFD_min = f_min + b_dist
-        sfd_min = f_min + b_dist
-
-        # SDD formula (6)/(7): ensure detector coverage
-        try:
-            dd = self._to_mm(float(self.txt_dd.text().replace(",", ".")))
-        except ValueError:
-            dd = 200.0
-        sdd_min = self.calc.calculate_sdd_min(dd)
-        if sdd_min > sfd_min:
-            sfd_min = sdd_min
-
-        # Geometric Unsharpness (moved here for early use in warnings)
-        ug = self.calc.calculate_geometric_unsharpness(d, b_dist, sfd)
-        f_min_star, ci_factor = self.calc.calculate_f_min_star(d, b_dist, t, testing_class)
-        if f_min_star is not None and f_min_star > f_min:
-            f_min = f_min_star
+        # Shared geometry block (b, f_min, sfd_min, sdd_min, ug, f_min*)
+        geo = self._compute_geometry(od, t, d, sfd, geometry, testing_class)
+        b_dist = geo["b_dist"]
+        b_eff = geo["b_eff"]
+        b_rule_applied = geo["b_rule_applied"]
+        f_min = geo["f_min"]
+        sfd_min = geo["sfd_min"]
+        sdd_min = geo["sdd_min"]
+        ug = geo["ug"]
+        f_min_star = geo["f_min_star"]
+        ci_factor = geo["ci_factor"]
+        std_figure = geo["std_figure"]
+        bgap = geo["bgap"]
+        dd = geo["dd"]
 
         # Inspection standard (ISO 17636 / ASME Sec V Art 2)
         standard = self.cmb_standard.currentData() if hasattr(self, "cmb_standard") else "iso"
@@ -2455,18 +2507,10 @@ class MainWindow(QMainWindow,
 
         # Filter recommendation output
         filter_recs = self.calc.get_filter_recommendations(source, material, input_kv, testing_class)
-        # Format string based on language (screen table is ISO 17636-1 Clause 7.3)
-        st = filter_recs.get("screen_table", {})
-        if self.trans.language == "tr":
-            filt = filter_recs["metal_filter"].replace("Yok", "Yok").replace("veya", "veya")
-            filter_str = (f"Ön: {st.get('front_mm', '')} mm Pb | Arka: {st.get('back_mm', '')} mm Pb"
-                          f" | Filtre: {filt}")
-        else:
-            front_en = {"<= 0.15 (opsiyonel)": "<= 0.15 (optional)"}.get(st.get('front_mm', ''), st.get('front_mm', ''))
-            back_en = {"<= 0.15 veya yok": "<= 0.15 or none"}.get(st.get('back_mm', ''), st.get('back_mm', ''))
-            filter_str = (f"Front: {front_en} mm Pb | Back: {back_en} mm Pb"
-                          f" | Filter: {filter_recs['metal_filter']}")
-            
+        # Localize the language-neutral structural data in the UI/i18n layer
+        from src.core.translation import format_filter_recommendation
+        filter_str = format_filter_recommendation(filter_recs, self.trans.language)
+
         self.out_labels["filter_recommendation"][1].setText(filter_str)
 
         # Store calculated results for compliance checker
@@ -2539,41 +2583,49 @@ class MainWindow(QMainWindow,
         defect_type = defect_types[self.cmb_defect_type.currentIndex()]
 
         try:
-            length = float(self.txt_defect_length.text().replace(",", "."))
+            length = self._to_mm(float(self.txt_defect_length.text().replace(",", ".")))
         except ValueError:
             length = 0.0
 
         try:
-            width = float(self.txt_defect_width.text().replace(",", "."))
+            width = self._to_mm(float(self.txt_defect_width.text().replace(",", ".")))
         except ValueError:
             width = 0.0
 
         try:
-            accum = float(self.txt_defect_accum.text().replace(",", "."))
+            accum = self._to_mm(float(self.txt_defect_accum.text().replace(",", ".")))
         except ValueError:
             accum = 0.0
 
         is_accepted, reason = self.api_eval.evaluate(defect_type, t, length, width, accum, self.trans.language)
         # Route to the selected defect standard
         defect_standard = self.cmb_defect_standard.currentData()
+        approx = False
         if defect_standard == "iso5817":
             from src.core.iso5817 import ISO5817Evaluator
             level = self.cmb_quality_level.currentText()
             is_accepted, reason = ISO5817Evaluator().evaluate(
                 defect_type, t, length, width, accum, level=level, lang=self.trans.language
             )
+            approx = True
         elif defect_standard == "b31_3":
             from src.core.asme_b31_3 import ASMEB31_3Evaluator
             service = self.cmb_b31_service.currentData()
             is_accepted, reason = ASMEB31_3Evaluator().evaluate(
                 defect_type, t, length, width, accum, service=service, lang=self.trans.language
             )
+            approx = True
         elif defect_standard == "viii":
             from src.core.asme_viii import ASMEVIIIEvaluator
             mode = self.cmb_viii_mode.currentData()
             is_accepted, reason = ASMEVIIIEvaluator().evaluate(
                 defect_type, t, length, width, accum, mode=mode, lang=self.trans.language
             )
+            approx = True
+
+        if approx:
+            note = self.trans.get("defect_approx_note")
+            reason = f"{reason}\n\n{note}"
 
         if is_accepted:
             self.lbl_defect_result.setText(self.trans.get("result_accept"))
@@ -2768,36 +2820,14 @@ class MainWindow(QMainWindow,
         # Gather outputs
         w_nom, w_eff = self.calc.calculate_thicknesses(t, cap, geometry)
         u_max = self.calc.calculate_u_max(w_nom, material)
-        is_curved = self.rad_detector_curved.isChecked()
-        std_figure = self.cmb_std_figure.currentData() if hasattr(self, 'cmb_std_figure') else None
-        try:
-            bed = self._to_mm(float(self.txt_bed.text().replace(",", ".")))
-        except ValueError:
-            bed = 0.0
-        try:
-            bgap = self._to_mm(float(self.txt_bgap.text().replace(",", ".")))
-        except ValueError:
-            bgap = 5.0
-        if is_curved and self.calc.is_central_projection(geometry, std_figure):
-            b_dist = self.calc.calculate_b_panoramic(bed, bgap, t)
-        elif is_curved:
-            b_dist = self.calc.calculate_b_curved(bed, bgap, t, testing_class)
-        else:
-            b_dist = t if geometry in ["swsi", "dwsi"] else od
-        f_min = self.calc.calculate_f_min(d, b_dist, testing_class, t)
-        sfd_min = f_min + b_dist
-        try:
-            dd = self._to_mm(float(self.txt_dd.text().replace(",", ".")))
-        except ValueError:
-            dd = 200.0
-        sdd_min = self.calc.calculate_sdd_min(dd)
-        if sdd_min > sfd_min:
-            sfd_min = sdd_min
+        geo = self._compute_geometry(od, t, d, sfd, geometry, testing_class)
+        f_min = geo["f_min"]
+        sfd_min = geo["sfd_min"]
         
         if geometry == "swsi":
             exposures = 1
         elif geometry == "dwdi_elliptic":
-            exposures = 2
+            exposures = self.calc.get_dwdi_elliptical_exposures(od, t)
         elif geometry == "dwdi_super":
             exposures = 3
         else:
@@ -2858,8 +2888,33 @@ class MainWindow(QMainWindow,
             except ValueError:
                 def_accum = 0.0
 
-            # evaluate again to get full details
+            # evaluate again to get full details through the active standard
             is_accepted, reason = self.api_eval.evaluate(defect_type, t, def_len, def_width, def_accum, self.trans.language)
+            defect_standard = self.cmb_defect_standard.currentData()
+            approx = False
+            if defect_standard == "iso5817":
+                from src.core.iso5817 import ISO5817Evaluator
+                is_accepted, reason = ISO5817Evaluator().evaluate(
+                    defect_type, t, def_len, def_width, def_accum,
+                    level=self.cmb_quality_level.currentText(), lang=self.trans.language
+                )
+                approx = True
+            elif defect_standard == "b31_3":
+                from src.core.asme_b31_3 import ASMEB31_3Evaluator
+                is_accepted, reason = ASMEB31_3Evaluator().evaluate(
+                    defect_type, t, def_len, def_width, def_accum,
+                    service=self.cmb_b31_service.currentData(), lang=self.trans.language
+                )
+                approx = True
+            elif defect_standard == "viii":
+                from src.core.asme_viii import ASMEVIIIEvaluator
+                is_accepted, reason = ASMEVIIIEvaluator().evaluate(
+                    defect_type, t, def_len, def_width, def_accum,
+                    mode=self.cmb_viii_mode.currentData(), lang=self.trans.language
+                )
+                approx = True
+            if approx:
+                reason = f"{reason}\n\n{self.trans.get('defect_approx_note')}"
 
             defect_eval = {
                 "active": True,
@@ -2891,6 +2946,7 @@ class MainWindow(QMainWindow,
             self.canvas.save_figure(tmp_dynamic.name)
             dynamic_img_path = tmp_dynamic.name
         except Exception:
+            logger.exception("Failed to save dynamic sketch for PDF")
             dynamic_img_path = None
 
         try:
@@ -2899,6 +2955,7 @@ class MainWindow(QMainWindow,
             self.std_canvas.save_figure(tmp_standard.name)
             standard_img_path = tmp_standard.name
         except Exception:
+            logger.exception("Failed to save standard sketch for PDF")
             standard_img_path = None
 
         success = self.pdf_gen.generate_report(
@@ -2915,7 +2972,7 @@ class MainWindow(QMainWindow,
                 try:
                     os.unlink(p)
                 except Exception:
-                    pass
+                    logger.exception("Failed to remove temp sketch file %s", p)
 
         if success:
             QMessageBox.information(self, self.trans.get("success"), self.trans.get("report_saved", filepath))
@@ -2993,27 +3050,33 @@ class MainWindow(QMainWindow,
         self._update_thread.start()
 
     def _on_update_check_result(self, result, silent):
-        self.check_update_action.setEnabled(True)
-        self.check_update_action.setText("Check for Updates")
+        try:
+            self.check_update_action.setEnabled(True)
+            self.check_update_action.setText("Check for Updates")
 
-        if result.get("available"):
-            reply = QMessageBox.question(
-                self, "Update Available",
-                f"A new version ({result['version']}) is available.\n\n"
-                f"{result.get('release_notes', '')[:500]}\n\n"
-                f"Download and install now?",
-                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
-            )
-            if reply == QMessageBox.StandardButton.Yes:
-                self._download_and_install(result)
-        elif result.get("error"):
-            if not silent:
-                QMessageBox.warning(self, "Update Check Failed",
-                                    f"Could not check for updates:\n{result['error']}")
-        else:
-            if not silent:
-                QMessageBox.information(self, "No Updates",
-                                        f"You are running the latest version ({CURRENT_VERSION}).")
+            if result.get("available"):
+                version = str(result.get("version", "?"))
+                # release_notes may be None/null from the GitHub API -> slice a str
+                notes = str(result.get("release_notes") or "")[:500]
+                reply = QMessageBox.question(
+                    self, "Update Available",
+                    f"A new version ({version}) is available.\n\n"
+                    f"{notes}\n\n"
+                    f"Download and install now?",
+                    QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
+                )
+                if reply == QMessageBox.StandardButton.Yes:
+                    self._download_and_install(result)
+            elif result.get("error"):
+                if not silent:
+                    QMessageBox.warning(self, "Update Check Failed",
+                                        f"Could not check for updates:\n{result['error']}")
+            else:
+                if not silent:
+                    QMessageBox.information(self, "No Updates",
+                                            f"You are running the latest version ({CURRENT_VERSION}).")
+        except Exception:
+            logger.exception("Update check result handling failed")
 
     def _download_and_install(self, release_data):
         checker = UpdateChecker()
@@ -3040,41 +3103,48 @@ class MainWindow(QMainWindow,
 
         class DownloadThread(QThread):
             finished = pyqtSignal(object)
+            progress = pyqtSignal(int)
 
             def run(self):
                 try:
                     filepath = checker.download_update(
                         url,
-                        progress_callback=lambda pct: self.progress.setValue(int(pct * 100))
+                        # Emit a signal instead of touching Qt widgets from the
+                        # worker thread (Qt thread-safety -> crash otherwise).
+                        progress_callback=lambda pct: self.progress.emit(int(pct * 100))
                     )
                     self.finished.emit(filepath)
                 except Exception as e:
                     self.finished.emit(e)
 
         self._download_thread = DownloadThread()
+        self._download_thread.progress.connect(self.progress.setValue)
         self._download_thread.finished.connect(lambda fp: self._on_download_finished(fp, checker))
         self._download_thread.start()
 
     def _on_download_finished(self, filepath, checker):
-        self.progress.close()
-        if filepath is None:
-            return
-        if isinstance(filepath, Exception):
-            QMessageBox.critical(self, "Download Failed", str(filepath))
-            return
+        try:
+            self.progress.close()
+            if filepath is None:
+                return
+            if isinstance(filepath, Exception):
+                QMessageBox.critical(self, "Download Failed", str(filepath))
+                return
 
-        reply = QMessageBox.question(
-            self, "Download Complete",
-            "Update downloaded. Install now?",
-            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
-        )
-        if reply == QMessageBox.StandardButton.Yes:
-            try:
-                checker.launch_installer(filepath)
-                QMessageBox.information(self, "Installer Launched",
-                                        "The installer has been launched. Please close the application and follow the installation steps.")
-            except Exception as e:
-                QMessageBox.critical(self, "Launch Failed", str(e))
+            reply = QMessageBox.question(
+                self, "Download Complete",
+                "Update downloaded. Install now?",
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
+            )
+            if reply == QMessageBox.StandardButton.Yes:
+                try:
+                    checker.launch_installer(filepath)
+                    QMessageBox.information(self, "Installer Launched",
+                                            "The installer has been launched. Please close the application and follow the installation steps.")
+                except Exception as e:
+                    QMessageBox.critical(self, "Launch Failed", str(e))
+        except Exception:
+            logger.exception("Update download completion handling failed")
 
     def apply_theme(self):
         """

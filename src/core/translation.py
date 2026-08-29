@@ -98,6 +98,10 @@ class Translation:
                 "fig5_title": "ISO 17636-1 Şekil 5 (Panoramik - Odak Merkezde)",
                 "fig6_title": "ISO 17636-1 Şekil 6 (Eksantrik - Odak İçeride Kenarda)",
                 "fig7_title": "ISO 17636-1 Şekil 7 (Odak Dışarıda, Film İçeride)",
+                "fig8b_title": "ISO 17636-2 Şekil 8b (Panoramik - Eğri Dedektör)",
+                "fig9b_title": "ISO 17636-2 Şekil 9b (Eksantrik - Eğri Dedektör)",
+                "fig10b_title": "ISO 17636-2 Şekil 10b (DWSI - Eğri Dedektör)",
+                "fig14b_title": "ISO 17636-2 Şekil 14b (DWDI - Eğri Dedektör)",
                 "fig11_title": "ISO 17636-1 Şekil 11 (DWDI - Eliptik Görüntü)",
                 "fig12_title": "ISO 17636-1 Şekil 12 (DWDI - Perpendiküler/Üst Üste)",
                 "fig13_title": "ISO 17636-1 Şekil 13 (DWSI - Odak Dışarıda, Tek Duvar Görüntü)",
@@ -191,6 +195,7 @@ class Translation:
                 "defect_std_iso5817": "ISO 5817",
                 "defect_std_b31_3": "ASME B31.3",
                 "defect_std_viii": "ASME VIII (UW-51/52)",
+                "defect_approx_note": "UYARI: Bu standart modülü mühendislik yaklaşımı değerler kullanır; resmi kabul kararı vermeden önce standardın güncel baskısıyla doğrulanmalıdır.",
                 "b31_service": "Servis Kategorisi:",
                 "service_normal": "Normal Fluid",
                 "service_severe": "Severe Cyclic",
@@ -404,6 +409,10 @@ class Translation:
                 "fig5_title": "ISO 17636-1 Figure 5 (Panoramic - Central Source)",
                 "fig6_title": "ISO 17636-1 Figure 6 (Eccentric - Source Inside)",
                 "fig7_title": "ISO 17636-1 Figure 7 (Source Outside, Film Inside)",
+                "fig8b_title": "ISO 17636-2 Figure 8b (Panoramic - Curved Detector)",
+                "fig9b_title": "ISO 17636-2 Figure 9b (Eccentric - Curved Detector)",
+                "fig10b_title": "ISO 17636-2 Figure 10b (DWSI - Curved Detector)",
+                "fig14b_title": "ISO 17636-2 Figure 14b (DWDI - Curved Detector)",
                 "fig11_title": "ISO 17636-1 Figure 11 (DWDI - Elliptical)",
                 "fig12_title": "ISO 17636-1 Figure 12 (DWDI - Superimposed)",
                 "fig13_title": "ISO 17636-1 Figure 13 (DWSI - Source Outside, Single Wall)",
@@ -497,6 +506,7 @@ class Translation:
                 "defect_std_iso5817": "ISO 5817",
                 "defect_std_b31_3": "ASME B31.3",
                 "defect_std_viii": "ASME VIII (UW-51/52)",
+                "defect_approx_note": "NOTE: This standard module uses engineering approximation values and must be verified against the current edition of the standard before making formal acceptance decisions.",
                 "b31_service": "Service Category:",
                 "service_normal": "Normal Fluid",
                 "service_severe": "Severe Cyclic",
@@ -632,3 +642,57 @@ class Translation:
             except Exception:
                 return text
         return text
+
+
+_FILTER_MATERIAL_NAMES = {
+    "tr": {"cu": "Cu", "pb": "Pb", "al": "Al", None: "Yok"},
+    "en": {"cu": "Cu", "pb": "Pb", "al": "Al", None: "None"},
+}
+
+
+def format_filter_recommendation(recs, lang="tr"):
+    """
+    Builds a localized one-line filter/screen recommendation from the
+    language-neutral structural data returned by
+    RTCalculator.get_filter_recommendations.
+    """
+    screen = (recs or {}).get("screen_table", {}) or {}
+    metal = (recs or {}).get("metal_filter", {}) or {}
+    names = _FILTER_MATERIAL_NAMES.get(lang, _FILTER_MATERIAL_NAMES["tr"])
+
+    front = screen.get("front_mm", "")
+    back = screen.get("back_mm", "")
+
+    if screen.get("front_is_filter"):
+        front_part = f"{front} mm Cu" if front else ""
+    else:
+        front_part = f"{front} mm Pb" if front else ""
+    if screen.get("front_optional"):
+        front_part += " (opsiyonel)" if lang == "tr" else " (optional)"
+    back_part = f"{back} mm Pb" if back else ""
+    if screen.get("back_optional"):
+        back_part += " (opsiyonel" if lang == "tr" else " (optional"
+        if screen.get("back_absent"):
+            back_part += ", yok olabilir)" if lang == "tr" else ", may be omitted)"
+        else:
+            back_part += ")"
+
+    screen_str = f"Ön: {front_part} | Arka: {back_part}" if lang == "tr" \
+        else f"Front: {front_part} | Back: {back_part}"
+
+    # Metal filter options ("Yok", "0.5 mm Cu", "0.5 mm Cu veya 1.0 mm Al", ...)
+    options = metal.get("options", []) or []
+    filter_parts = []
+    for opt in options:
+        mat = opt.get("material")
+        thick = opt.get("thickness")
+        if mat is None or not thick:
+            filter_parts.append(names.get(None, "Yok"))
+        else:
+            filter_parts.append(f"{thick} mm {names.get(mat, mat)}")
+    if not filter_parts:
+        filter_parts.append(names.get(None, "Yok"))
+    filter_str = " veya ".join(filter_parts) if lang == "tr" else " or ".join(filter_parts)
+
+    prefix = "Filtre" if lang == "tr" else "Filter"
+    return f"{screen_str} | {prefix}: {filter_str}"

@@ -287,6 +287,118 @@ class TestMainWindowInit(unittest.TestCase):
         self.win.canvas.draw_setup(50.0, 5.0, 3.0, "dwsi", 600.0, self.win.trans, is_dark=False)
         bg = self.win.canvas.axes.get_facecolor()
         self.assertGreater(sum(bg[:3]), 2.0, f"Expected light background, got {bg}")
+
+    def test_inch_mode_standard_pipe_no_double_conversion(self):
+        # Regression: standard ASME pipe values are mm; toggling inch mode must
+        # NOT multiply them by 25.4 again (was 114.3 -> 2903 mm).
+        idx = self.win.cmb_od.findData('4" (NPS 4)')
+        self.assertGreaterEqual(idx, 0)
+        self.win.cmb_od.setCurrentIndex(idx)
+        self.win.populate_standard_thicknesses()
+        # Select the SCH 40 / STD wall (6.02 mm) for 4" NPS
+        t_idx = None
+        for i in range(self.win.cmb_t.count()):
+            if self.win.cmb_t.itemData(i) == 6.02:
+                t_idx = i
+                break
+        self.assertIsNotNone(t_idx)
+        self.win.cmb_t.setCurrentIndex(t_idx)
+
+        # Activate inch mode (no custom entries => combo values are authoritative)
+        if not self.win.use_inch:
+            self.win.toggle_units()
+        self.assertTrue(self.win.use_inch)
+        od, t, cap, *_ = self.win.get_form_values()
+        self.assertAlmostEqual(od, 114.3, places=2)
+        self.assertAlmostEqual(t, 6.02, places=2)
+        self.win.toggle_units()  # restore mm
+
+    def test_inch_mode_custom_values_are_converted(self):
+        # Custom entries are typed in the current display unit; in inch mode a
+        # 4.5" OD / 0.25" wall must be converted to mm by get_form_values.
+        self.win.toggle_units()  # -> inch
+        self.win.txt_custom_od.setText("4.5")
+        self.win.txt_custom_t.setText("0.25")
+        od, t, *_ = self.win.get_form_values()
+        self.assertAlmostEqual(od, 4.5 * 25.4, places=1)
+        self.assertAlmostEqual(t, 0.25 * 25.4, places=1)
+        self.win.toggle_units()  # restore mm
+        self.win.txt_custom_od.setText("")
+        self.win.txt_custom_t.setText("")
+
+    def test_defect_fields_participate_in_unit_toggle(self):
+        # Defect length/width/accum must be converted to mm in inch mode so a
+        # 1.0" indication is NOT evaluated as 1.0 mm.
+        self.assertIn("txt_defect_length", self.win._MM_FIELDS)
+        self.assertIn("txt_defect_width", self.win._MM_FIELDS)
+        self.assertIn("txt_defect_accum", self.win._MM_FIELDS)
+        self.win.toggle_units()  # -> inch
+        self.assertAlmostEqual(self.win._to_mm(1.0), 25.4, places=2)
+        self.win.toggle_units()  # restore
+
+    def test_open_decay_dialog_does_not_crash_on_empty_date(self):
+        # Regression: opening the isotope decay tool with an empty calibration
+        # date previously raised in the slot and aborted the app (PyQt6 qFatal).
+        # We open the modal dialog and auto-close it via a timer.
+        from PyQt6.QtCore import QTimer
+        from PyQt6.QtWidgets import QApplication
+
+        idx = self.win.cmb_source.findData("isotope_ir192")
+        self.assertGreaterEqual(idx, 0)
+        self.win.cmb_source.setCurrentIndex(idx)
+
+        def _close():
+            mw = QApplication.activeModalWidget()
+            if mw is not None:
+                mw.reject()
+
+        QTimer.singleShot(100, _close)
+        self.win.open_decay_dialog()  # must return (no abort)
+        self.assertTrue(True)
+
+    def test_export_pdf_with_special_chars_in_report_fields(self):
+        # Regression: ReportLab Paragraph parses XML-like markup, so unescaped
+        # '&', '<', '>' in user report fields crashed PDF export (ValueError ->
+        # PyQt6 slot abort). Escaping must make it save successfully.
+        import tempfile, os
+        from unittest import mock
+
+        tmp = os.path.join(tempfile.gettempdir(), "rt_test_special.pdf")
+        if os.path.exists(tmp):
+            os.remove(tmp)
+
+        from src.ui.main_window import QFileDialog, QMessageBox
+        with mock.patch.object(QFileDialog, "getSaveFileName",
+                               return_value=(tmp, "PDF Files (*.pdf)")):
+            with mock.patch.object(QMessageBox, "information"):
+                with mock.patch.object(QMessageBox, "critical"):
+                    self.win.txt_report_no.setText('No & <b>123')
+                    self.win.txt_project.setText('Ğü & <x>')
+                    self.win.txt_lvl2_name.setText('Seviye <b>II')
+                    self.win.export_pdf_report()
+        try:
+            self.assertTrue(os.path.exists(tmp), "PDF must be generated")
+            self.assertGreater(os.path.getsize(tmp), 0)
+        finally:
+            if os.path.exists(tmp):
+                os.remove(tmp)
+
+    def test_update_check_handles_null_release_notes(self):
+        # Regression: GitHub API can return release_notes = None; slicing it
+        # (result.get(...)[:500]) previously raised TypeError inside the slot
+        # and aborted the app. Must not raise.
+        from unittest import mock
+        from src.ui.main_window import QMessageBox
+
+        result = {"available": True, "version": "9.9.9",
+                  "release_notes": None, "assets": []}
+        with mock.patch.object(QMessageBox, "question",
+                               return_value=QMessageBox.StandardButton.No):
+            self.win._on_update_check_result(result, silent=False)
+
+        result_err = {"available": False, "error": "certificate verify failed", "data": None}
+        with mock.patch.object(QMessageBox, "warning"):
+            self.win._on_update_check_result(result_err, silent=False)
         self.win.canvas.draw_setup(50.0, 5.0, 3.0, "dwsi", 600.0, self.win.trans, is_dark=True)
         bg = self.win.canvas.axes.get_facecolor()
         self.assertLess(sum(bg[:3]), 1.0, f"Expected dark background, got {bg}")

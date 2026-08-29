@@ -332,24 +332,41 @@ class TestRTCalculator(unittest.TestCase):
     def test_get_filter_recommendations(self):
         # X-ray on steel, 120 kV
         recs = self.calc.get_filter_recommendations("x_ray", "steel", 120.0, "class_b")
-        self.assertEqual(recs["screen_table"]["front_mm"], "<= 0.15 (opsiyonel)")
-        self.assertEqual(recs["metal_filter"], "0.5 mm Cu veya 1.0 mm Al")
+        self.assertEqual(recs["screen_table"]["front_mm"], "<=0.15")
+        self.assertEqual(recs["screen_table"]["front_optional"], True)
+        self.assertEqual(recs["screen_table"]["back_absent"], True)
+        self.assertEqual(recs["metal_filter"]["options"],
+                         [{"material": "cu", "thickness": "0.5"},
+                          {"material": "al", "thickness": "1.0"}])
 
         # Isotope Ir-192
         recs_ir = self.calc.get_filter_recommendations("isotope_ir192", "steel", None, "class_b")
         self.assertEqual(recs_ir["screen_table"]["front_mm"], "0.05-0.20")
         self.assertEqual(recs_ir["screen_table"]["back_mm"], "0.05-0.20")
-        self.assertEqual(recs_ir["metal_filter"], "1.0 mm Cu veya 1.0 mm Pb")
+        self.assertEqual(recs_ir["metal_filter"]["options"],
+                         [{"material": "cu", "thickness": "1.0"},
+                          {"material": "pb", "thickness": "1.0"}])
 
         # Isotope Co-60
         recs_co = self.calc.get_filter_recommendations("isotope_co60", "steel", None, "class_a")
         self.assertEqual(recs_co["screen_table"]["front_mm"], "0.10-0.30")
-        self.assertEqual(recs_co["metal_filter"], "1.0-2.0 mm Pb")
+        self.assertEqual(recs_co["metal_filter"]["options"],
+                         [{"material": "pb", "thickness": "1.0-2.0"}])
 
         # X-ray at high voltage (> 250 kV, <= 450 kV)
         recs_high = self.calc.get_filter_recommendations("x_ray", "steel", 300.0, "class_b")
         self.assertEqual(recs_high["screen_table"]["front_mm"], "0.05-0.15")
-        self.assertEqual(recs_high["metal_filter"], "1.0 mm Cu")
+        self.assertEqual(recs_high["metal_filter"]["options"],
+                         [{"material": "cu", "thickness": "1.0"}])
+
+        # Low-kV X-ray (< 120 kV): no-filter option is present
+        recs_low = self.calc.get_filter_recommendations("x_ray", "steel", 80.0, "class_b")
+        self.assertEqual(recs_low["metal_filter"]["options"][0]["material"], None)
+
+        # Very high kV (> 1000): front screen is a copper filter, not Pb
+        recs_mv = self.calc.get_filter_recommendations("x_ray", "steel", 2000.0, "class_b")
+        self.assertEqual(recs_mv["screen_table"]["front_is_filter"], True)
+        self.assertEqual(recs_mv["screen_table"]["front_mm"], "1-2")
 
     def test_calculate_dwsi_exposures(self):
         # Class A, OD=114.3, t=8.56, SFD=600.0
@@ -1117,6 +1134,36 @@ class TestRTCalculatorEdgeCases(unittest.TestCase):
         # Invalid inputs -> 0
         self.assertEqual(self.calc.calculate_decayed_activity(0.0, calib, None, "isotope_ir192"), 0.0)
         self.assertEqual(self.calc.calculate_decayed_activity(-5.0, calib, None, "isotope_ir192"), 0.0)
+
+    def test_decay_days_since_multiple_date_formats(self):
+        from datetime import date, timedelta
+        # Same day in several accepted string formats must give identical days.
+        d30 = date.today() - timedelta(days=30)
+        fmt = d30.strftime
+        for s in (d30.isoformat(), fmt("%Y/%m/%d"), fmt("%d.%m.%Y"),
+                  fmt("%d/%m/%Y"), fmt("%d-%m-%Y")):
+            self.assertEqual(self.calc.decay_days_since(s, None), 30, msg=s)
+        # Date object directly
+        self.assertEqual(self.calc.decay_days_since(d30, None), 30)
+        # Unparseable strings must NOT raise -> returns 0.0
+        for bad in ("27/08/2026"[:0] and "" or "invalid", "", "31.13.2026"):
+            try:
+                days = self.calc.decay_days_since(bad, None)
+                self.assertEqual(days, 0.0)
+            except Exception:
+                self.fail(f"decay_days_since({bad!r}) must not raise")
+
+    def test_calculate_decayed_activity_never_raises_on_bad_date(self):
+        # Regression: the isotope decay tool called calculate_decayed_activity
+        # with an empty/invalid calibration date which previously raised and
+        # aborted the app (PyQt6 slot -> qFatal). Must return a0 instead.
+        for bad in ("", None, "invalid", "31.13.2026", "27.08.2026", "27/08/2026"):
+            try:
+                a = self.calc.calculate_decayed_activity(40.0, bad, None, "isotope_ir192")
+            except Exception:
+                self.fail(f"calculate_decayed_activity(40.0, {bad!r}) must not raise")
+            # Empty/invalid => undecayed 40.0; valid alt-format => decayed value
+            self.assertGreater(a, 0.0)
 
     def test_barrier_distance_gamma_convention(self):
         r_r, base_r, _ = self.calc.calculate_barrier_distance("isotope_ir192", 20.0, limit_usvh=20.0, hvl_layers=0.0, convention="r")

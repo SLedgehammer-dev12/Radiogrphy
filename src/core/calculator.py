@@ -1509,7 +1509,7 @@ class RTCalculator:
 
         if tech == "analog":
             # ── Film speed: faster film → shorter exposure
-            film_speed = self.FILM_SPEED_FACTORS.get(film_class, 2.0)   # default C5
+            film_speed = self.FILM_SPEED_FACTORS.get(film_class, 16.0)   # default C5
             # ── OD target: film-class-aware gradient density correction
             od_factor = self._density_correction_factor(testing_class, film_class)
             time_minutes = t_base * od_factor / film_speed
@@ -1739,62 +1739,108 @@ class RTCalculator:
         """
         Determines recommended lead screen thickness and metal filter based on
         ISO 17636-1:2022 Clause 7.3 (lead screens) and metal filters.
-        Returns dict with pb_screen, metal_filter and screen_table (front/back
-        lead thickness ranges in mm per the standard).
+
+        Returns LANGUAGE-NEUTRAL structural data only (no formatted strings):
+            {
+              "screen_table": {
+                  "front_mm": str,          # lead range, e.g. "0.02-0.15", "<=0.15"
+                  "back_mm": str,
+                  "front_optional": bool,   # front lead screen may be omitted
+                  "back_optional": bool,    # back lead screen may be omitted
+                  "back_absent": bool,      # back lead screen may be absent entirely
+                  "front_is_filter": bool,  # front is a metal filter, not Pb (high kV)
+              },
+              "metal_filter": {
+                  "options": [              # ordered alternatives; material None => no filter
+                      {"material": "cu"|"pb"|"al"|None, "thickness": str|None},
+                      ...
+                  ],
+              },
+            }
+        Localization/formatting is the responsibility of the UI/i18n layer
+        (see src/core/translation.py::format_filter_recommendation).
         """
-        pb_screen = ""
-        metal_filter = ""
-        screen_table = {"front_mm": "", "back_mm": ""}
+        front = ""
+        back = ""
+        front_optional = False
+        back_optional = False
+        back_absent = False
+        front_is_filter = False
+        options = [{"material": None, "thickness": None}]
 
         if source == "x_ray":
             if kv is None:
                 kv = 120.0
             # ISO 17636-1:2022 Clause 7.3.2 — lead screen thickness (mm)
             if kv <= 120.0:
-                front = "<= 0.15 (opsiyonel)"
-                back = "<= 0.15 veya yok"
-                metal_filter = "Yok veya 0.1 mm Al" if kv < 120.0 else "0.5 mm Cu veya 1.0 mm Al"
+                front = "<=0.15"
+                back = "<=0.15"
+                front_optional = True
+                back_optional = True
+                back_absent = True
+                if kv < 120.0:
+                    options = [
+                        {"material": None, "thickness": None},
+                        {"material": "al", "thickness": "0.1"},
+                    ]
+                else:
+                    options = [
+                        {"material": "cu", "thickness": "0.5"},
+                        {"material": "al", "thickness": "1.0"},
+                    ]
             elif kv <= 250.0:
                 front = "0.02-0.15"
                 back = "0.02-0.15"
-                metal_filter = "0.5 mm Cu veya 1.0 mm Al"
+                options = [
+                    {"material": "cu", "thickness": "0.5"},
+                    {"material": "al", "thickness": "1.0"},
+                ]
             elif kv <= 450.0:
                 front = "0.05-0.15"
                 back = "0.05-0.15"
-                metal_filter = "1.0 mm Cu"
+                options = [{"material": "cu", "thickness": "1.0"}]
             elif kv <= 1000.0:
                 front = "0.10-0.30"
                 back = "0.10-0.30"
-                metal_filter = "1.0-2.0 mm Cu"
+                options = [{"material": "cu", "thickness": "1.0-2.0"}]
             else:
-                front = "1-2 mm Cu (ön ekran)"
+                front = "1-2"
+                front_is_filter = True   # front screen is copper, not lead
                 back = "0.10-0.30"
-                metal_filter = "1.0-2.0 mm Cu"
-            pb_screen = f"Ön: {front} mm Pb | Arka: {back} mm Pb"
+                options = [{"material": "cu", "thickness": "1.0-2.0"}]
         else:
             # Isotopes
             if source == "isotope_se75":
                 front, back = "0.02-0.20", "0.02-0.20"
-                metal_filter = "0.5 mm Cu"
+                options = [{"material": "cu", "thickness": "0.5"}]
             elif source == "isotope_ir192":
                 front, back = "0.05-0.20", "0.05-0.20"
-                metal_filter = "1.0 mm Cu veya 1.0 mm Pb"
+                options = [
+                    {"material": "cu", "thickness": "1.0"},
+                    {"material": "pb", "thickness": "1.0"},
+                ]
             elif source == "isotope_co60":
                 front, back = "0.10-0.30", "0.10-0.30"
-                metal_filter = "1.0-2.0 mm Pb"
+                options = [{"material": "pb", "thickness": "1.0-2.0"}]
             elif source in ("isotope_yb169", "isotope_tm170"):
                 front, back = "0.02-0.20", "0.02-0.20"
-                metal_filter = "0.5 mm Cu"
+                options = [{"material": "cu", "thickness": "0.5"}]
             else:
                 front, back = "0.02-0.15", "0.02-0.15"
-                metal_filter = "Yok"
-            pb_screen = f"Ön: {front} mm Pb | Arka: {back} mm Pb"
+                options = [{"material": None, "thickness": None}]
 
-        screen_table = {"front_mm": front, "back_mm": back}
         return {
-            "pb_screen": pb_screen,
-            "metal_filter": metal_filter,
-            "screen_table": screen_table,
+            "screen_table": {
+                "front_mm": front,
+                "back_mm": back,
+                "front_optional": front_optional,
+                "back_optional": back_optional,
+                "back_absent": back_absent,
+                "front_is_filter": front_is_filter,
+            },
+            "metal_filter": {
+                "options": options,
+            },
         }
 
     # -----------------------------------------------------------------------
@@ -1963,16 +2009,31 @@ class RTCalculator:
 
     def decay_days_since(self, calib_date, inspection_date=None):
         """Whole days between the calibration date and the inspection date
-        (defaults to today). Accepts date/datetime or 'YYYY-MM-DD' strings."""
+        (defaults to today). Accepts date/datetime objects or strings in
+        common formats: YYYY-MM-DD, YYYY/MM/DD, DD.MM.YYYY, DD/MM/YYYY,
+        DD-MM-YYYY. Returns 0.0 for unparseable dates instead of raising."""
         from datetime import date, datetime
+
+        _DATE_FORMATS = (
+            "%Y-%m-%d", "%Y/%m/%d", "%d.%m.%Y", "%d/%m/%Y", "%d-%m-%Y",
+        )
+
         def _to_date(d):
             if isinstance(d, datetime):
                 return d.date()
             if isinstance(d, date):
                 return d
             if isinstance(d, str):
-                return datetime.strptime(d[:10], "%Y-%m-%d").date()
+                s = d.strip()
+                if not s:
+                    return None
+                for fmt in _DATE_FORMATS:
+                    try:
+                        return datetime.strptime(s, fmt).date()
+                    except ValueError:
+                        continue
             return None
+
         c = _to_date(calib_date)
         if c is None:
             return 0.0
@@ -1996,7 +2057,12 @@ class RTCalculator:
         half_life = self.ISOTOPE_HALF_LIVES.get(isotope)
         if not half_life or half_life <= 0.0:
             return a0
-        days = self.decay_days_since(calib_date, inspection_date)
+        try:
+            days = self.decay_days_since(calib_date, inspection_date)
+        except Exception:
+            # Never crash on a bad calibration/inspection date; report
+            # undecayed activity so the caller can show a meaningful error.
+            return a0
         if days <= 0.0:
             return a0
         return a0 * (2.0 ** (-days / half_life))

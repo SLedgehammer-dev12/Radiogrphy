@@ -117,7 +117,13 @@ class ExposureChartDatabase:
         self.TYPE_X_CHART.clear()
         self.TYPE_X_CHART.update(data)
 
-    def generate_type_x_chart(self, calculator):
+    def generate_type_x_chart(self, calculator, base_factor=3.0, film_speed=16.0):
+        """
+        Generates the Type X (X-ray) exposure chart for the physics model.
+        base_factor: source exposure chart constant (mA·min/m² at 1 m, SNR 70).
+        film_speed:  ISO 11699-1 film speed factor of the reference film
+                     (default 16.0 == C5, matching the physics model default).
+        """
         self.TYPE_X_CHART = {}
         for kv in self.TYPE_X_KV_VALUES:
             kv_data = {}
@@ -125,8 +131,6 @@ class ExposureChartDatabase:
                 mu = calculator.get_mu_from_kv(float(kv), "steel")
                 attenuation = math.exp(min(700.0, mu * t_mm))
                 sfd_m = 700.0 / 1000.0
-                base_factor = 3.0
-                film_speed = 16.0
                 od_factor = 1.0
                 exposure_mamin = base_factor * (sfd_m ** 2) * attenuation * od_factor / film_speed
                 kv_data[t_mm] = exposure_mamin

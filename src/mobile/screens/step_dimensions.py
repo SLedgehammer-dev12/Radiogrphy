@@ -4,8 +4,10 @@ from kivymd.uix.menu import MDDropdownMenu
 from core.asme_b36 import ASME_B36_10_PIPES, get_pipe_schedules, get_default_schedule
 
 
+# Sort standard pipes by numeric outer diameter (mm) instead of parsing the
+# nominal-size display strings (fragile string replacement).
 PIPE_KEYS = sorted(ASME_B36_10_PIPES.keys(),
-                   key=lambda k: float(k.split('"')[0].replace(" 1/4", ".25").replace(" 1/2", ".5").replace(" 3/4", ".75").replace(" 1/8", ".125").replace(" 3/8", ".375").replace(" 1 1/4", "1.25").replace(" 1 1/2", "1.5").replace(" 2 1/2", "2.5")))
+                   key=lambda k: ASME_B36_10_PIPES[k][0])
 
 
 class StepDimensions(MDScreen):

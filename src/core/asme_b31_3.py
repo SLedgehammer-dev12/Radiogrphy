@@ -10,6 +10,9 @@ the current edition of ASME B31.3 before formal use.
 
 class ASMEB31_3Evaluator:
     SERVICES = ("normal", "severe")
+    # Limits below are engineering approximations of Table 341.3.2; not a
+    # substitute for the current edition of ASME B31.3 in formal decisions.
+    IS_APPROXIMATION = True
 
     def _msg(self, lang, key, *args):
         table = {

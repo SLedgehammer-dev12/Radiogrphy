@@ -1,11 +1,14 @@
 import sys
 import os
+import logging
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", ".."))
 
 from core.calculator import RTCalculator
 from core.api1104 import API1104Evaluator
 from core.procedure_check import ProcedureComplianceChecker
 from core.translation import Translation
+
+logger = logging.getLogger("radiography.mobile.app_state")
 
 
 class AppState:
@@ -51,6 +54,8 @@ class AppState:
         self.detector_curved = False
         self.bed = 10.0
         self.bgap = 5.0
+        self.d = 2.0
+        self.dd = 200.0
 
         self.app_sfd = 600.0
         self.app_kv = 120.0
@@ -121,35 +126,87 @@ class AppState:
             "film_class": self.film_class,
             "snr_location": self.snr_location,
             "iqi_type": self.iqi_type,
+            "focal_size": getattr(self, "d", 2.0),
+            "detector_size": getattr(self, "dd", 200.0),
         }
 
     def run_calculations(self):
         vals = self.get_form_values()
 
+        # 1. Thicknesses (calculate_thicknesses returns tuple (w_nom, w_eff))
         try:
-            thicknesses = self.calc.calculate_thicknesses(vals["t"], vals["cap"], vals["geometry"])
-            w_nom = thicknesses.get("w_nom", vals["t"])
-            w_eff = thicknesses.get("w_eff", vals["t"])
+            w_nom, w_eff = self.calc.calculate_thicknesses(vals["t"], vals["cap"], vals["geometry"])
         except Exception:
+            logger.exception("calculate_thicknesses failed")
             w_nom = vals["t"]
             w_eff = vals["t"]
 
+        # 2. Tube voltage limit
         try:
             u_max = self.calc.calculate_u_max(w_nom, vals["material"])
         except Exception:
+            logger.exception("calculate_u_max failed")
             u_max = 0.0
+
+        # 3. Object-to-detector distance (b) - mirrors desktop logic
+        geometry = vals["geometry"]
+        t = vals["t"]
+        od = vals["od"]
+        is_curved = vals.get("detector_curved", False)
+        std_figure = None  # mobile doesn't have std_figure selector
+        testing_class = vals["testing_class"]
+
         try:
-            f_min = self.calc.calculate_f_min(0, 0, vals["testing_class"], w_nom)
+            bed = float(vals.get("bed", 0.0))
+        except (TypeError, ValueError):
+            bed = 0.0
+        try:
+            bgap = float(vals.get("bgap", 5.0))
+        except (TypeError, ValueError):
+            bgap = 5.0
+
+        if is_curved and self.calc.is_central_projection(geometry, std_figure):
+            b_dist = self.calc.calculate_b_panoramic(bed, bgap, t)
+        elif is_curved:
+            b_dist = self.calc.calculate_b_curved(bed, bgap, t, testing_class)
+        else:
+            b_dist = t if geometry in ["swsi", "dwsi"] else od
+        b_eff, b_rule_applied = self.calc.get_effective_b(b_dist, t)
+
+        # 4. Minimum source-to-object distance (f_min)
+        try:
+            d = float(vals.get("focal_size", 2.0))
+        except (TypeError, ValueError):
+            d = 2.0
+        try:
+            f_min = self.calc.calculate_f_min(d, b_dist, testing_class, t)
         except Exception:
+            logger.exception("calculate_f_min failed")
             f_min = 0.0
+
+        # 5. Source-to-detector distance minimum (sfd_min)
+        sfd_min = f_min + b_dist
+        # Detector size constraint
         try:
-            sdd_min = self.calc.calculate_sdd_min(vals.get("detector_size", 0))
-        except Exception:
-            sdd_min = 0.0
+            dd = float(vals.get("detector_size", 200.0))
+        except (TypeError, ValueError):
+            dd = 200.0
+        sdd_min = self.calc.calculate_sdd_min(dd)
+        if sdd_min > sfd_min:
+            sfd_min = sdd_min
+
+        # 6. Geometric unsharpness (Ug) - use applied SFD
         try:
-            ug = self.calc.calculate_geometric_unsharpness(vals.get("focal_size", 2), 0, 0)
+            sfd = float(vals.get("app_sfd", 600.0))
+        except (TypeError, ValueError):
+            sfd = 600.0
+        try:
+            ug = self.calc.calculate_geometric_unsharpness(d, b_dist, sfd)
         except Exception:
+            logger.exception("calculate_geometric_unsharpness failed")
             ug = 0.0
+
+        # 7. IQI targets (single wire / duplex) - these return (display_str, wire_no) tuples
         try:
             single_wire_iqi = self.calc.get_single_wire_iqi(
                 vals["t"], vals["cap"], vals["testing_class"],
@@ -157,15 +214,15 @@ class AppState:
                 self.language
             )
         except Exception:
-            single_wire_iqi = {"w_no": 0, "label": "-"}
+            logger.exception("get_single_wire_iqi failed")
+            single_wire_iqi = ("-", 0)
         try:
             duplex_iqi = self.calc.get_duplex_iqi(w_nom, vals["testing_class"], vals["geometry"], self.language)
         except Exception:
-            duplex_iqi = {"d_no": 0, "label": "-"}
-        try:
-            sfd_min = self.calc.calculate_sfd_min(0, 0, vals["testing_class"], w_nom)
-        except Exception:
-            sfd_min = 0.0
+            logger.exception("get_duplex_iqi failed")
+            duplex_iqi = ("-", 0)
+
+        # 8. Exposure time
         try:
             base_e = 3.0 if vals["source"] == "x_ray" else \
                 (30.0 if vals["source"] == "isotope_ir192" else
@@ -186,67 +243,75 @@ class AppState:
                 material=vals["material"],
             )
         except Exception:
+            logger.exception("calculate_exposure_time failed")
             calc_time = 0.0
-        # Field correction factor (F): scales the model exposure time for
-        # field/equipment conditions deviating from model assumptions.
+        # Field correction factor (F)
         try:
-            f = float(self.base_multiplier)
+            f_mult = float(self.base_multiplier)
         except (TypeError, ValueError):
-            f = 1.0
-        if f <= 0.0:
-            f = 1.0
-        calc_time = calc_time * f
+            f_mult = 1.0
+        if f_mult <= 0.0:
+            f_mult = 1.0
+        calc_time = calc_time * f_mult
+
+        # 9. Quality targets
         try:
             target_snr = self.calc.get_target_snr(
                 vals["material"], vals["source"], vals["kv"],
                 w_nom, vals["testing_class"], self.language
             )
         except Exception:
+            logger.exception("get_target_snr failed")
             target_snr = 0
         try:
             req_film = self.calc.get_required_film_class(w_nom, vals["testing_class"], vals["material"], vals["source"])
         except Exception:
+            logger.exception("get_required_film_class failed")
             req_film = ""
         try:
             filter_rec = self.calc.get_filter_recommendations(vals["source"], vals["material"], vals["kv"], vals["testing_class"])
         except Exception:
+            logger.exception("get_filter_recommendations failed")
             filter_rec = ""
+
+        # 10. Exposure count
         try:
-            geom = vals["geometry"]
-            if geom == "swsi":
+            if geometry == "swsi":
                 exposures = 1
-            elif geom == "dwdi_elliptic":
+            elif geometry == "dwdi_elliptic":
                 exposures = self.calc.get_dwdi_elliptical_exposures(vals["od"], vals["t"])
-            elif geom == "dwdi_super":
+            elif geometry == "dwdi_super":
                 exposures = 3
             else:  # dwsi
-                exposures = self.calc.calculate_dwsi_exposures(vals["od"], vals["t"], sfd_min)
+                exposures = self.calc.calculate_dwsi_exposures(vals["od"], vals["t"], sfd_min, testing_class)
         except Exception:
+            logger.exception("exposure count calculation failed")
             exposures = 0
 
-        # DWDI geometry warnings (ISO 17636-1:2022 Clauses 7.1.6/7.1.7)
+        # 11. DWDI geometry warnings (localized)
         dwdi_warnings = []
         if vals["geometry"] in ("dwdi_elliptic", "dwdi_super"):
             dwdi_res = self.calc.validate_dwdi(
                 vals["geometry"], vals["od"], vals["t"], vals.get("weld_width")
             )
+            tr = self.language == "tr"
             if not dwdi_res["od_ok"]:
-                dwdi_warnings.append("DWDI only valid for OD <= 100 mm")
+                dwdi_warnings.append("DWDI only valid for OD <= 100 mm" if not tr else "DWDI sadece OD <= 100 mm için geçerlidir")
             if vals["geometry"] == "dwdi_elliptic":
                 if not dwdi_res["t_ok"]:
-                    dwdi_warnings.append("DWDI elliptical: t must be <= 8 mm (ISO 17636-1 7.1.6)")
+                    dwdi_warnings.append("DWDI elliptical: t must be <= 8 mm (ISO 17636-1 7.1.6)" if not tr else "DWDI eliptik: t <= 8 mm olmalı (ISO 17636-1 7.1.6)")
                 if not dwdi_res["weld_width_ok"]:
-                    dwdi_warnings.append(f"Weld width must be <= De/4 = {vals['od'] / 4.0:.1f} mm")
+                    dwdi_warnings.append(f"Weld width must be <= De/4 = {vals['od'] / 4.0:.1f} mm" if not tr else f"Kaynak genişliği De/4 = {vals['od'] / 4.0:.1f} mm'den küçük olmalı")
                 dwdi_warnings.append(
-                    "t/De >= 0.12 -> 3 images (ISO 17636-1 7.1.6)"
+                    "t/De >= 0.12 -> 3 images (ISO 17636-1 7.1.6)" if not tr else "t/De >= 0.12 -> 3 poz (ISO 17636-1 7.1.6)"
                     if dwdi_res["needs_three"] else
-                    "t/De < 0.12 -> 2 images (ISO 17636-1 7.1.6)"
+                    "t/De < 0.12 -> 2 images (ISO 17636-1 7.1.6)" if not tr else "t/De < 0.12 -> 2 poz (ISO 17636-1 7.1.6)"
                 )
             else:
-                dwdi_warnings.append("DWDI super: 3 exposures (120°/60°) (ISO 17636-1 7.1.7)")
+                dwdi_warnings.append("DWDI super: 3 exposures (120°/60°) (ISO 17636-1 7.1.7)" if not tr else "DWDI üstüste: 3 poz (120°/60°) (ISO 17636-1 7.1.7)")
         self.warnings = dwdi_warnings
 
-        # Radiation barrier distance (isotopes) - controlled 20 / supervised 7.5 uSv/h
+        # 12. Radiation barrier distance (isotopes)
         barrier_str = ""
         if vals["source"] != "x_ray":
             try:
@@ -260,6 +325,7 @@ class AppState:
             else:
                 barrier_str = f"Controlled (20 µSv/h): {r_c:.1f} m | Supervised (7.5): {r_s:.1f} m"
 
+        # 13. Store results (keep tuples as-is for UI; store wire/duplex numbers separately)
         self.results = {
             "w_nom": w_nom,
             "w_eff": w_eff,
@@ -281,18 +347,23 @@ class AppState:
             "required_quality": target_snr if vals["tech"] == "digital" else 2.0,
         }
 
+        # 14. Procedure compliance check
         try:
+            wire_no = single_wire_iqi[1] if isinstance(single_wire_iqi, tuple) else 0
+            duplex_no = duplex_iqi[1] if isinstance(duplex_iqi, tuple) else 0
+            max_srb = self.calc.get_max_srb(w_nom, testing_class, geometry)
+
             calced = {
                 "u_max": u_max,
                 "sfd_min": sfd_min,
-                "required_wire_no": single_wire_iqi.get("w_no", 0),
-                "required_duplex_no": duplex_iqi.get("d_no", 0),
+                "required_wire_no": wire_no,
+                "required_duplex_no": duplex_no,
                 "required_film_class": req_film,
                 "required_density": 2.0,
                 "required_snr": target_snr,
                 "ug": ug,
                 "calc_time_raw": calc_time,
-                "max_srb": 100.0,
+                "max_srb": max_srb,
             }
             applied = {
                 "applied_kv": vals["app_kv"],
@@ -320,6 +391,7 @@ class AppState:
                 inputs, calced, applied, {}, self.language
             )
         except Exception as e:
+            logger.exception("procedure compliance check failed")
             self.compliance = {"is_compliant": False, "checks": [], "error": str(e)}
 
         self._calc_dirty = False
@@ -328,29 +400,38 @@ class AppState:
     def evaluate_defect(self, defect_type, length, width, accumulated):
         try:
             vals = self.get_form_values()
+            approx = False
             if self.defect_standard == "iso5817":
                 from core.iso5817 import ISO5817Evaluator
                 self.defect_eval = ISO5817Evaluator().evaluate(
                     defect_type, vals["t"], length, width, accumulated,
                     level=self.defect_level, lang=self.language
                 )
+                approx = True
             elif self.defect_standard == "b31_3":
                 from core.asme_b31_3 import ASMEB31_3Evaluator
                 self.defect_eval = ASMEB31_3Evaluator().evaluate(
                     defect_type, vals["t"], length, width, accumulated,
                     service=self.b31_service, lang=self.language
                 )
+                approx = True
             elif self.defect_standard == "viii":
                 from core.asme_viii import ASMEVIIIEvaluator
                 self.defect_eval = ASMEVIIIEvaluator().evaluate(
                     defect_type, vals["t"], length, width, accumulated,
                     mode=self.viii_mode, lang=self.language
                 )
+                approx = True
             else:
                 self.defect_eval = self.api1104.evaluate(
                     defect_type, vals["t"], length, width, accumulated, self.language
                 )
+            if approx and isinstance(self.defect_eval, tuple):
+                is_ok, result = self.defect_eval
+                note = self.get_text("defect_approx_note")
+                self.defect_eval = (is_ok, f"{result}\n\n{note}")
         except Exception as e:
+            logger.exception("evaluate_defect failed")
             self.defect_eval = {"status": False, "result": "error", "details": str(e)}
         return self.defect_eval
 

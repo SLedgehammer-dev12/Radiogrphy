@@ -24,7 +24,7 @@ source.main = src/mobile/main.py
 source.include_exts = py,png,jpg,kv,atlas,ttf
 
 # (list) List of inclusions using pattern matching
-source.include_patterns = src/mobile/*.py,src/mobile/assets/*,src/mobile/assets/fonts/*.ttf,src/mobile/kv/*/*.kv,src/mobile/lib/*.py,src/mobile/responsive/*.py,src/mobile/screens/*.py,src/core/*.py
+source.include_patterns = src/mobile/*.py,src/mobile/assets/*,src/mobile/assets/fonts/*.ttf,src/mobile/kv/*/*.kv,src/mobile/lib/*.py,src/mobile/responsive/*.py,src/mobile/screens/*.py,src/core/*.py,src/android/**
 
 # (list) Source files to exclude (leave empty to not exclude anything)
 source.exclude_exts = spec,pyc
@@ -37,7 +37,8 @@ source.exclude_dirs = tests, bin, venv, __pycache__, .git, src/ui
 #source.exclude_patterns = license,images/*/*.jpg
 
 # (str) Application versioning (method 1)
-version = 1.4.1
+# CI rewrites this from src/core/version.py before building; keep in sync manually.
+version = 1.7.0
 
 # (list) Application requirements
 # comma separated e.g. requirements = sqlite3,kivy
@@ -157,7 +158,7 @@ android.accept_sdk_license = True
 
 # (str) Extra xml to write directly inside the <manifest><application> tag of AndroidManifest.xml
 # use that parameter to provide a filename from where to load your custom XML arguments:
-#android.extra_manifest_application_arguments = ./src/android/extra_manifest_application_arguments.xml
+android.extra_manifest_application_arguments = ./src/android/extra_manifest_application_arguments.xml
 
 # (str) Full name including package path of the Java class that implements Python Service
 # use that parameter to set custom Java class which extends PythonService

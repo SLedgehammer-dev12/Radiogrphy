@@ -1,5 +1,54 @@
 # Changelog
 
+## [1.7.0] - 2026-08-29
+
+### Fixed (macOS crash hardening)
+- Global exception handler in `main.py`: unhandled PyQt6 slot exceptions are now
+  logged to `~/Library/Logs/Radiography/` instead of calling `qFatal()`/`abort()`
+- Isotope decay tool no longer crashes when the calibration date is empty or in a
+  non-ISO format (`calculate_decayed_activity` never raises on bad dates)
+- PDF report export no longer crashes when user report fields contain XML special
+  characters (`&`, `<`, `>`) — all user text is escaped for ReportLab Paragraph
+- Update checker no longer crashes when GitHub returns `null` release notes, and
+  the download progress callback no longer touches Qt widgets from the worker
+  thread (thread-safety)
+
+### Fixed (calculation correctness)
+- Metric/imperial toggle no longer double-converts standard ASME pipe dimensions
+  (114.3 mm was becoming ~2903 mm); custom entries are still converted to mm
+- Defect evaluation (API 1104 / ISO 5817 / ASME) now converts inch inputs to mm;
+  a 1.0" indication is no longer evaluated as 1.0 mm
+- Mobile calculation engine rewritten: weld cap now included in `w_eff`, and
+  `f_min`/`sfd_min`/`Ug`/SDD are computed with real geometry instead of zero
+- Mobile procedure-compliance check no longer always errors (tuple `.get` misuse)
+- PDF report now uses the dynamic DWDI elliptical exposure count (3 when
+  t/De >= 0.12) instead of a hardcoded 2
+- PDF and UI share the same geometry block (`_compute_geometry`), so `f_min*`
+  (magnification rule) is consistent between screen and report
+- Film-speed fallback now matches the documented default (C5 = 16.0)
+- Date parsing accepts DD.MM.YYYY / DD/MM/YYYY / DD-MM-YYYY formats
+
+### Fixed (security)
+- Updater no longer silently falls back to an unverified SSL context (MITM risk);
+  downloaded installers are verified with SHA-256 when a hash is available
+- Android PDF sharing uses FileProvider (`content://`) instead of `Uri.fromFile`
+  (FileUriExposedException on Android 7.0+)
+
+### Added
+- ISO 17636-2 digital detector figures (8b/9b/10b/14b) added to the standard
+  schematic selector
+- Setup sketch weld caps now scale with the user-entered cap height
+- `get_filter_recommendations` returns language-neutral structural data; TR/EN
+  formatting moved to the i18n layer (`format_filter_recommendation`)
+- Approximate-standard disclaimer (ISO 5817 / ASME B31.3 / ASME VIII) shown in
+  the defect evaluation UI and PDF report
+- Version is read from a single source (`src/core/version.py`) for dmgbuild and
+  synced into `buildozer.spec` by CI
+
+### Infrastructure
+- `certifi` added to `pyproject.toml` dependencies; mobile pipe list sorted by
+  numeric outer diameter instead of fragile string parsing
+
 ## [1.6.2] - 2026-08-27
 
 ### Added

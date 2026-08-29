@@ -4,9 +4,21 @@ Volume name can be overridden via env DMG_VOLUME_NAME for CI builds.
 """
 
 import os
+import sys
+
+
+def _app_version():
+    """Reads the version from src/core/version.py (single source of truth)."""
+    try:
+        sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+        from src.core.version import VERSION
+        return str(VERSION)
+    except Exception:
+        return "1.7.0"
+
 
 APP_NAME = "Radiography"
-VOLUME_NAME = os.environ.get("DMG_VOLUME_NAME", "Radiography 1.2.0")
+VOLUME_NAME = os.environ.get("DMG_VOLUME_NAME", f"Radiography {_app_version()}")
 APP_PATH = os.path.abspath(os.path.join("dist", "Radiography.app"))
 
 icon = os.path.abspath("app.icns")

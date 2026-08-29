@@ -68,5 +68,61 @@ class TestUpdater(unittest.TestCase):
         finally:
             platform.system = orig_sys
 
+    def test_sha256_file_and_verify(self):
+        from src.core.updater import _sha256_file, _verify_sha256
+        import hashlib, tempfile
+
+        with tempfile.NamedTemporaryFile("wb", delete=False) as f:
+            f.write(b"Radiography test payload")
+            path = f.name
+        try:
+            digest = _sha256_file(path)
+            self.assertEqual(len(digest), 64)
+            expected = hashlib.sha256(b"Radiography test payload").hexdigest()
+            self.assertEqual(digest, expected)
+            ok, actual = _verify_sha256(path, expected)
+            self.assertTrue(ok)
+            self.assertEqual(actual, expected)
+            bad, _ = _verify_sha256(path, "0" * 64)
+            self.assertFalse(bad)
+        finally:
+            os.unlink(path)
+
+    def test_download_update_rejects_wrong_hash(self):
+        # A local file:// URL with a mismatched expected SHA-256 must raise.
+        from src.core.updater import UpdateChecker
+        import tempfile
+
+        with tempfile.NamedTemporaryFile("wb", suffix=".bin", delete=False) as f:
+            f.write(b"malicious-payload")
+            path = f.name
+        url = f"file://{path}"
+        checker = UpdateChecker()
+        try:
+            with self.assertRaises(RuntimeError):
+                checker.download_update(url, expected_sha256="0" * 64)
+        finally:
+            if os.path.exists(path):
+                os.unlink(path)
+
+    def test_download_update_accepts_correct_hash(self):
+        from src.core.updater import UpdateChecker, _sha256_file
+        import tempfile
+
+        with tempfile.NamedTemporaryFile("wb", suffix=".bin", delete=False) as f:
+            f.write(b"good-payload")
+            path = f.name
+        url = f"file://{path}"
+        checker = UpdateChecker()
+        try:
+            downloaded = checker.download_update(url, expected_sha256=_sha256_file(path))
+            self.assertIsNotNone(downloaded)
+            self.assertTrue(os.path.exists(downloaded))
+            if downloaded:
+                os.unlink(downloaded)
+        finally:
+            if os.path.exists(path):
+                os.unlink(path)
+
 if __name__ == "__main__":
     unittest.main()

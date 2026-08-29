@@ -54,15 +54,28 @@ class WeldSketchCanvas(FigureCanvas):
         self.axes.add_patch(inner_circle)
 
         # Draw Welds (Top and Bottom)
+        # Weld cap geometry follows the user-entered cap height (mm), clamped
+        # to stay legible within the pipe cross-section drawing.
+        try:
+            cap_mm = float(cap) if cap is not None else 0.0
+        except (TypeError, ValueError):
+            cap_mm = 0.0
+        if cap_mm > 0.0:
+            weld_h = min(cap_mm, R * 0.30)
+            weld_w = min(2.5 * cap_mm, R * 0.45)
+        else:
+            weld_h = R * 0.08
+            weld_w = R * 0.18
+
         # Top weld cap
-        top_weld_out = patches.Arc((0, R), R*0.2, R*0.1, theta1=0, theta2=180, color=weld_color, linewidth=2)
-        top_weld_in = patches.Arc((0, Ri), R*0.2, R*0.1, theta1=180, theta2=360, color=weld_color, linewidth=2)
+        top_weld_out = patches.Arc((0, R), weld_w, weld_h, theta1=0, theta2=180, color=weld_color, linewidth=2)
+        top_weld_in = patches.Arc((0, Ri), weld_w, weld_h, theta1=180, theta2=360, color=weld_color, linewidth=2)
         self.axes.add_patch(top_weld_out)
         self.axes.add_patch(top_weld_in)
         
         # Bottom weld cap
-        bot_weld_out = patches.Arc((0, -R), R*0.2, R*0.1, theta1=180, theta2=360, color=weld_color, linewidth=2)
-        bot_weld_in = patches.Arc((0, -Ri), R*0.2, R*0.1, theta1=0, theta2=180, color=weld_color, linewidth=2)
+        bot_weld_out = patches.Arc((0, -R), weld_w, weld_h, theta1=180, theta2=360, color=weld_color, linewidth=2)
+        bot_weld_in = patches.Arc((0, -Ri), weld_w, weld_h, theta1=0, theta2=180, color=weld_color, linewidth=2)
         self.axes.add_patch(bot_weld_out)
         self.axes.add_patch(bot_weld_in)
 
@@ -415,6 +428,81 @@ class StandardSchematicCanvas(FigureCanvas):
             self.axes.text(-0.5, -0.9, "b = t", color=text_color, fontsize=9)
             
             self.axes.set_title(lang_obj.get("fig13_title"), color=text_color, fontsize=10)
+
+        elif fig_name == "fig8b": # Fig 8b: ISO 17636-2 - panoramic central source, curved DDA
+            # Pipe
+            self.axes.add_patch(patches.Circle((0, 0), R, color=pipe_color, fill=False, linewidth=2))
+            self.axes.add_patch(patches.Circle((0, 0), Ri, color=pipe_color, fill=False, linewidth=1.5, linestyle='--'))
+            # Curved detector wrapped around outer wall
+            self.axes.add_patch(patches.Circle((0, 0), R*1.08, color=det_color, fill=False, linewidth=3))
+            # Central source
+            self.axes.plot(0, 0, marker='*', color=source_color, markersize=12)
+            self.axes.text(0.1, 0.1, "S (Panoramic)", color=text_color, fontsize=9, fontweight='bold')
+            # Diverging rays
+            for angle in [0, 90, 180, 270]:
+                rad = np.radians(angle)
+                self.axes.plot([0, R*np.sin(rad)], [0, R*np.cos(rad)], color=beam_color, linestyle=':', alpha=0.8)
+            self.axes.text(0.2, -0.5, "f = R\nb = t", color=text_color, fontsize=10,
+                           bbox=dict(facecolor=bg_color, alpha=0.5))
+            self.axes.set_title(lang_obj.get("fig8b_title"), color=text_color, fontsize=10)
+
+        elif fig_name == "fig9b": # Fig 9b: ISO 17636-2 - eccentric source inside, curved DDA
+            # Pipe
+            self.axes.add_patch(patches.Circle((0, 0), R, color=pipe_color, fill=False, linewidth=2))
+            self.axes.add_patch(patches.Circle((0, 0), Ri, color=pipe_color, fill=False, linewidth=1.5, linestyle='--'))
+            # Eccentric source near top
+            ys = 0.5
+            self.axes.plot(0, ys, marker='*', color=source_color, markersize=10)
+            self.axes.text(0.1, ys+0.1, "S", color=text_color, fontsize=9, fontweight='bold')
+            # Curved detector arc at bottom (inside the pipe)
+            detector_arc = patches.Arc((0, 0), Ri*2.0, Ri*2.0, theta1=220, theta2=320, color=det_color, linewidth=4)
+            self.axes.add_patch(detector_arc)
+            # Beam to bottom
+            self.axes.plot([0, R*np.sin(np.radians(-40))], [ys, -R*np.cos(np.radians(-40))], color=beam_color, linestyle=':')
+            self.axes.plot([0, R*np.sin(np.radians(40))], [ys, -R*np.cos(np.radians(40))], color=beam_color, linestyle=':')
+            self.axes.annotate('', xy=(0, -Ri), xytext=(0, ys), arrowprops=dict(arrowstyle='<->', color=text_color))
+            self.axes.text(-0.2, (ys - Ri)/2, "f", color=text_color, fontsize=10, fontweight='bold')
+            self.axes.set_title(lang_obj.get("fig9b_title"), color=text_color, fontsize=10)
+
+        elif fig_name == "fig10b": # Fig 10b: ISO 17636-2 - DWSI, source outside, curved DDA
+            # Pipe
+            self.axes.add_patch(patches.Circle((0, 0), R, color=pipe_color, fill=False, linewidth=2))
+            self.axes.add_patch(patches.Circle((0, 0), Ri, color=pipe_color, fill=False, linewidth=1.5, linestyle='--'))
+            # Source outside at top
+            ys = 1.8
+            self.axes.plot(0, ys, marker='o', color=source_color, markersize=10)
+            self.axes.text(0.1, ys+0.1, "S", color=text_color, fontsize=9, fontweight='bold')
+            # Curved DDA outside at bottom
+            detector_arc = patches.Arc((0, 0), R*2.08, R*2.08, theta1=220, theta2=320, color=det_color, linewidth=4)
+            self.axes.add_patch(detector_arc)
+            # Beam
+            self.axes.plot([0, R*np.sin(np.radians(-40))], [ys, -R*np.cos(np.radians(-40))], color=beam_color, linestyle=':')
+            self.axes.plot([0, R*np.sin(np.radians(40))], [ys, -R*np.cos(np.radians(40))], color=beam_color, linestyle=':')
+            self.axes.text(-0.6, 0.3, "f = SFD - t", color=text_color, fontsize=9)
+            self.axes.text(-0.5, -0.9, "b = t", color=text_color, fontsize=9)
+            self.axes.set_title(lang_obj.get("fig10b_title"), color=text_color, fontsize=10)
+
+        elif fig_name == "fig14b": # Fig 14b: ISO 17636-2 - DWDI, curved DDA
+            # Pipe
+            self.axes.add_patch(patches.Circle((0, 0), R, color=pipe_color, fill=False, linewidth=2))
+            self.axes.add_patch(patches.Circle((0, 0), Ri, color=pipe_color, fill=False, linewidth=1.5, linestyle='--'))
+            # Source outside offset for elliptical projection
+            xs = 0.4
+            ys = 1.8
+            self.axes.plot(xs, ys, marker='o', color=source_color, markersize=10)
+            self.axes.text(xs+0.1, ys+0.1, "S", color=text_color, fontsize=9, fontweight='bold')
+            # Curved DDA at bottom outside
+            detector_arc = patches.Arc((0, 0), R*2.08, R*2.08, theta1=200, theta2=340, color=det_color, linewidth=4)
+            self.axes.add_patch(detector_arc)
+            # Beam covering both walls
+            self.axes.plot([xs, -1.0], [ys, -1.2], color=beam_color, linestyle=':')
+            self.axes.plot([xs, 1.0], [ys, -1.2], color=beam_color, linestyle=':')
+            # Welds offset
+            self.axes.plot(0.2, R, marker='s', color=weld_color, markersize=6)
+            self.axes.plot(-0.2, -R, marker='s', color=weld_color, markersize=6)
+            self.axes.text(-0.5, 0, "b = OD", color=text_color, fontsize=10)
+            self.axes.text(0.6, 0.8, "f", color=text_color, fontsize=10)
+            self.axes.set_title(lang_obj.get("fig14b_title"), color=text_color, fontsize=10)
 
         # Uniform Limits
         self.axes.set_xlim(-2.0, 2.0)

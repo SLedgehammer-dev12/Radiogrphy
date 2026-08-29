@@ -1,3 +1,4 @@
+import hashlib
 import json
 import os
 import platform
@@ -31,27 +32,33 @@ def _ssl_context():
     try:
         return ssl.create_default_context()
     except Exception:
-        return ssl._create_unverified_context()
+        # Do NOT fall back to unverified context automatically.
+        # Raising here forces the caller to handle certificate issues explicitly.
+        raise
 
 
-def _open_url_with_fallback(req, timeout=10):
+def _open_url(req, timeout=10):
     """
-    Tries to open URL with secure SSL context first; if an SSL certificate
-    verification failure occurs on packaged Windows/embedded runtimes,
-    falls back to an unverified context so update checks never fail silently.
+    Opens URL with secure SSL context. Certificate verification failures
+    are NOT silently bypassed; they raise to the caller for explicit handling.
     """
     ctx = _ssl_context()
-    try:
-        return urllib.request.urlopen(req, timeout=timeout, context=ctx)
-    except (ssl.SSLError, ssl.CertificateError, urllib.error.URLError) as e:
-        err_msg = str(e).lower()
-        if isinstance(e, ssl.SSLError) or "certificate" in err_msg or "ssl" in err_msg or "verify failed" in err_msg:
-            try:
-                unverified_ctx = ssl._create_unverified_context()
-                return urllib.request.urlopen(req, timeout=timeout, context=unverified_ctx)
-            except Exception:
-                raise e
-        raise e
+    return urllib.request.urlopen(req, timeout=timeout, context=ctx)
+
+
+def _sha256_file(filepath):
+    """Returns SHA-256 hex digest of a file."""
+    h = hashlib.sha256()
+    with open(filepath, "rb") as f:
+        for chunk in iter(lambda: f.read(8192), b""):
+            h.update(chunk)
+    return h.hexdigest()
+
+
+def _verify_sha256(filepath, expected_hash):
+    """Verifies file SHA-256 against expected hash. Returns (bool, actual_hash)."""
+    actual = _sha256_file(filepath)
+    return (actual.lower() == expected_hash.lower(), actual)
 
 
 class UpdateChecker:
@@ -78,7 +85,7 @@ class UpdateChecker:
                     "User-Agent": "Radiography-Updater/1.0"
                 }
             )
-            with _open_url_with_fallback(req, timeout=10) as resp:
+            with _open_url(req, timeout=10) as resp:
                 data = json.loads(resp.read().decode("utf-8"))
         except Exception as e:
             return {"available": False, "error": str(e), "data": None}
@@ -117,11 +124,28 @@ class UpdateChecker:
                 return asset.get("browser_download_url")
         return None
 
-    def download_update(self, url, progress_callback=None):
+    def _extract_sha256_from_release(self, release_data, asset_name):
+        """
+        Attempts to extract SHA-256 hash for the given asset from release notes.
+        Expected format in release body: `sha256: <hash> <filename>` or similar.
+        """
+        body = release_data.get("body", "") or ""
+        import re
+        # Look for lines like: sha256: <hash> <filename> or <hash>  <filename>
+        for line in body.splitlines():
+            line = line.strip()
+            if asset_name in line:
+                # Try to find a 64-char hex string near the filename
+                match = re.search(r"([a-fA-F0-9]{64})", line)
+                if match:
+                    return match.group(1)
+        return None
+
+    def download_update(self, url, progress_callback=None, expected_sha256=None):
         self._cancel = False
         try:
             req = urllib.request.Request(url, headers={"User-Agent": "Radiography-Updater/1.0"})
-            with _open_url_with_fallback(req, timeout=120) as resp:
+            with _open_url(req, timeout=120) as resp:
                 total = int(resp.headers.get("Content-Length", 0))
                 downloaded = 0
                 chunk_size = 8192
@@ -153,6 +177,23 @@ class UpdateChecker:
                     if os.path.exists(tmp_path):
                         os.unlink(tmp_path)
                     return None
+
+                # SHA-256 verification
+                actual_hash = _sha256_file(tmp_path)
+                if expected_sha256 is None:
+                    # Try to extract from release notes if not provided
+                    pass  # caller should provide if available
+                if expected_sha256:
+                    ok, actual = _verify_sha256(tmp_path, expected_sha256)
+                    if not ok:
+                        os.unlink(tmp_path)
+                        raise RuntimeError(
+                            f"SHA-256 verification failed! Expected: {expected_sha256}, got: {actual}"
+                        )
+                # Log the hash for manual verification
+                import logging
+                logging.getLogger(__name__).info("Downloaded file SHA-256: %s", actual_hash)
+
                 return tmp_path
         except Exception as e:
             raise RuntimeError(f"Download failed: {e}")

@@ -14,6 +14,19 @@ from reportlab.pdfbase import pdfmetrics
 logger = logging.getLogger(__name__)
 
 
+def _esc(value):
+    """Escapes XML markup characters so user-supplied text is safe inside a
+    ReportLab Paragraph (which parses XML-like markup). Unescaped '&', '<',
+    '>' in report fields crash PDF generation with a Parse error."""
+    if value is None:
+        return ""
+    try:
+        from xml.sax.saxutils import escape
+        return escape(str(value))
+    except Exception:
+        return str(value)
+
+
 class PDFReportGenerator:
     _fonts_registered = False
 
@@ -79,7 +92,7 @@ class PDFReportGenerator:
                     PDFReportGenerator._FONT_MAP[name] = name
                     registered_arial += 1
                 except Exception:
-                    pass
+                    logger.warning("Could not register system font %s at %s", name, path, exc_info=True)
         if registered_arial == 4:
             try:
                 pdfmetrics.registerFontFamily(
@@ -87,7 +100,7 @@ class PDFReportGenerator:
                     italic="Arial-Italic", boldItalic="Arial-BoldItalic",
                 )
             except Exception:
-                pass
+                logger.warning("Could not register Arial font family", exc_info=True)
 
         # Register the bundled Noto Sans faces (portable fallback).
         noto_dir = PDFReportGenerator._bundled_font_dir()
@@ -99,7 +112,7 @@ class PDFReportGenerator:
                     pdfmetrics.registerFont(TTFont(name, path))
                     registered_noto += 1
                 except Exception:
-                    pass
+                    logger.warning("Could not register bundled font %s at %s", name, path, exc_info=True)
 
         # Prefer Arial only when all its faces are present; otherwise use the
         # bundled Noto Sans so Turkish/Unicode text always renders correctly.
@@ -117,7 +130,7 @@ class PDFReportGenerator:
                     italic="NotoSans-Italic", boldItalic="NotoSans-Bold",
                 )
             except Exception:
-                pass
+                logger.warning("Could not register NotoSans font family", exc_info=True)
 
     @staticmethod
     def _resolve_font(name):
@@ -264,7 +277,7 @@ class PDFReportGenerator:
         filled_info = [(key, report_info.get(key, "")) for key, _ in info_fields if report_info.get(key)]
         if filled_info:
             story.append(Paragraph(lang_obj.get("report_info_section"), section_style))
-            info_rows = [[Paragraph(lang_obj.get(key), label_style), Paragraph(value, value_style)]
+            info_rows = [[Paragraph(lang_obj.get(key), label_style), Paragraph(_esc(value), value_style)]
                          for key, value in filled_info]
             info_table = Table(info_rows, colWidths=[220, 280])
             info_table.setStyle(TableStyle([
@@ -388,16 +401,16 @@ class PDFReportGenerator:
             [Paragraph(lang_obj.get("exposures_check"), label_style), Paragraph(exp_check_str, value_style),
              Paragraph("", label_style), Paragraph("", value_style)],
             [Paragraph(lang_obj.get("w_eff"), label_style), Paragraph(f"{outputs.get('w_eff', 0.0):.2f} mm", value_style),
-             Paragraph(iqi_label, label_style), Paragraph(outputs.get('single_wire_iqi', ""), value_style)],
+             Paragraph(iqi_label, label_style), Paragraph(_esc(outputs.get('single_wire_iqi', "")), value_style)],
             [Paragraph(lang_obj.get("u_max"), label_style), Paragraph(f"{outputs.get('u_max', 0.0):.1f} kV" if outputs.get('u_max') else "N/A (Isotope)", value_style),
-             Paragraph(lang_obj.get("duplex_iqi"), label_style), Paragraph(outputs.get('duplex_iqi', "N/A (Analog Film)"), value_style)],
+             Paragraph(lang_obj.get("duplex_iqi"), label_style), Paragraph(_esc(outputs.get('duplex_iqi', "N/A (Analog Film)")), value_style)],
             [Paragraph(lang_obj.get("f_min"), label_style), Paragraph(f"{outputs.get('f_min', 0.0):.1f} mm", value_style),
-             Paragraph(lang_obj.get("calc_time"), label_style), Paragraph(outputs.get('calc_time', ""), value_style)],
+             Paragraph(lang_obj.get("calc_time"), label_style), Paragraph(_esc(outputs.get('calc_time', "")), value_style)],
             [Paragraph(lang_obj.get("sfd_min"), label_style), Paragraph(f"{outputs.get('sfd_min', 0.0):.1f} mm", value_style),
              Paragraph(lang_obj.get("target_snr") if inputs.get("tech") == "digital" else lang_obj.get("optical_density"), label_style),
-             Paragraph(str(outputs.get('quality_target', "")), value_style)],
-            [Paragraph(lang_obj.get("detector_quality"), label_style), Paragraph(outputs.get('detector_quality', ""), value_style),
-             Paragraph(lang_obj.get("filter_recommendation"), label_style), Paragraph(outputs.get('filter_recommendation', ""), value_style)],
+             Paragraph(_esc(outputs.get('quality_target', "")), value_style)],
+            [Paragraph(lang_obj.get("detector_quality"), label_style), Paragraph(_esc(outputs.get('detector_quality', "")), value_style),
+             Paragraph(lang_obj.get("filter_recommendation"), label_style), Paragraph(_esc(outputs.get('filter_recommendation', "")), value_style)],
             [Paragraph(lang_obj.get("base_multiplier"), label_style), Paragraph(f"{outputs.get('base_multiplier', 1.0):.2f}", value_style),
              Paragraph("", label_style), Paragraph("", value_style)]
         ]
@@ -407,14 +420,14 @@ class PDFReportGenerator:
         if asme_iqi and str(asme_iqi) != "N/A":
             outputs_data.append([
                 Paragraph(lang_obj.get("asme_iqi"), label_style),
-                Paragraph(str(asme_iqi), value_style),
+                Paragraph(_esc(asme_iqi), value_style),
                 Paragraph("", label_style), Paragraph("", value_style)
             ])
         barrier = outputs.get("barrier_distance")
         if barrier and str(barrier) != "N/A":
             outputs_data.append([
                 Paragraph(lang_obj.get("barrier_distance"), label_style),
-                Paragraph(str(barrier), value_style),
+                Paragraph(_esc(barrier), value_style),
                 Paragraph("", label_style), Paragraph("", value_style)
             ])
 
@@ -467,13 +480,13 @@ class PDFReportGenerator:
             result_lbl = lang_obj.get("result_accept") if defect_eval.get("status") else lang_obj.get("result_reject")
 
             defect_data = [
-                [Paragraph(lang_obj.get("defect_type"), label_style), Paragraph(defect_eval.get("type_text", ""), value_style)],
+                [Paragraph(lang_obj.get("defect_type"), label_style), Paragraph(_esc(defect_eval.get("type_text", "")), value_style)],
                 [Paragraph(lang_obj.get("defect_length"), label_style), Paragraph(f"{defect_eval.get('len', 0.0):.1f} mm", value_style)],
                 [Paragraph(lang_obj.get("defect_width"), label_style), Paragraph(f"{defect_eval.get('width', 0.0):.1f} mm", value_style)],
                 [Paragraph(lang_obj.get("accumulated_12in"), label_style), Paragraph(f"{defect_eval.get('accum', 0.0):.1f} mm", value_style)],
                 [Paragraph(f"<b>{lang_obj.get('evaluation_result')}</b>", label_style), 
                  Paragraph(f"<font color='{eval_text_color}'><b>{result_lbl}</b></font>", label_style)],
-                [Paragraph("<b>Reason / Details:</b>", label_style), Paragraph(defect_eval.get("reason", ""), value_style)]
+                [Paragraph("<b>Reason / Details:</b>", label_style), Paragraph(_esc(defect_eval.get("reason", "")), value_style)]
             ]
             
             defect_table = Table(defect_data, colWidths=[180, 320])
@@ -492,7 +505,7 @@ class PDFReportGenerator:
             story.append(Paragraph(lang_obj.get("warnings"), section_style))
             warn_table_data = []
             for w in warnings_list:
-                warn_table_data.append([Paragraph(f"• {w}", warning_style)])
+                warn_table_data.append([Paragraph(f"• {_esc(w)}", warning_style)])
             
             warn_table = Table(warn_table_data, colWidths=[500])
             warn_table.setStyle(TableStyle([
@@ -604,10 +617,10 @@ class PDFReportGenerator:
         story.append(Spacer(1, 20))
 
         # Formal approval blocks — Level II (Inspector) / Level III (Approver)
-        lvl2_name = (report_info or {}).get("lvl2_name", "")
-        lvl2_cert = (report_info or {}).get("lvl2_cert", "")
-        lvl3_name = (report_info or {}).get("lvl3_name", "")
-        lvl3_cert = (report_info or {}).get("lvl3_cert", "")
+        lvl2_name = _esc((report_info or {}).get("lvl2_name", ""))
+        lvl2_cert = _esc((report_info or {}).get("lvl2_cert", ""))
+        lvl3_name = _esc((report_info or {}).get("lvl3_name", ""))
+        lvl3_cert = _esc((report_info or {}).get("lvl3_cert", ""))
         sig_data = [
             ["", ""],
             ["_________________________", "_________________________"],
